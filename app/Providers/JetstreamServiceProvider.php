@@ -36,6 +36,24 @@ class JetstreamServiceProvider extends ServiceProvider
         Jetstream::removeTeamMembersUsing(RemoveTeamMember::class);
         Jetstream::deleteTeamsUsing(DeleteTeam::class);
         Jetstream::deleteUsersUsing(DeleteUser::class);
+		Jetstream::defaultApiTokenPermissions(['read']);
+
+Jetstream::role('shelter_admin', 'Shelter Admin', [
+    'shelter:update',
+    'shelter:delete',
+    'animal:create',
+    'animal:update',
+    'animal:delete',
+])->description('Full control inside a shelter.');
+
+Jetstream::role('staff', 'Staff', [
+    'animal:create',
+    'animal:update',
+])->description('Can manage animals.');
+
+Jetstream::role('viewer', 'Viewer', [
+    // read-only
+])->description('Can view animals.');
     }
 
     /**
