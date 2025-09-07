@@ -382,11 +382,11 @@
         @endforeach
     </section>
 
-    {{-- 5 ▸ Vet Corner (dynamic) --}}
-    <livewire:dogs.vet-corner :dog="$dog" />
-
     {{-- 6 ▸ Care-Team Notes (dynamic) --}}
     <livewire:dogs.care-notes :dog="$dog" />
+
+    {{-- 5 ▸ Vet Corner (dynamic) --}}
+    <livewire:dogs.vet-corner :dog="$dog" />
 
     {{-- 7 ▸ Dietetician (dynamic) --}}
     <livewire:dogs.dietician :dog="$dog" />
