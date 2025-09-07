@@ -1,6 +1,5 @@
 <?php
 
-// app/Livewire/Dogs/Table.php
 namespace App\Livewire\Dogs;
 
 use Livewire\Component;
@@ -12,22 +11,28 @@ class Table extends Component
 {
     use WithPagination;
 
-    public function render()
-    {
-        $rows = Auth::user()
-            ->currentTeam
-            ->dogs()
-            ->latest()
-            ->paginate(10);
+public function render()
+{
+// App\Livewire\Dogs\Table.php
+$rows = Auth::user()
+    ->currentTeam
+    ->dogs()
+    ->with('latestEvaluation')   // ← no column slice = no ambiguity
+    ->withCount('evaluations')
+    ->latest()
+    ->paginate(10);
 
-        $headers = [
-            ['index' => 'name',  'label' => 'Name'],
-            ['index' => 'breed', 'label' => 'Breed'],
-            ['index' => 'age',   'label' => 'Age'],
-            ['index' => 'sex',   'label' => 'Sex'],
-            ['index' => 'action'],            // action column (slot)
-        ];
 
-        return view('livewire.dogs.table', compact('headers', 'rows'));
-    }
+    $headers = [
+        ['index' => 'name',  'label' => 'Dog'],
+        ['index' => 'age',   'label' => 'Age'],
+        ['index' => 'sex',   'label' => 'Sex'],
+        ['index' => 'score', 'label' => 'Score'],
+        ['index' => 'flag',  'label' => 'Flag'],
+        ['index' => 'action'],
+    ];
+
+    return view('livewire.dogs.table', compact('headers', 'rows'));
+}
+
 }

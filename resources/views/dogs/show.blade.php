@@ -10,8 +10,8 @@
         </div>
     </x-slot>
 
-    <div class="p-6 max-w-3xl mx-auto">
+   
         {{-- Livewire component --}}
         <livewire:dogs.show :dog="$dog" />
-    </div>
+
 </x-app-layout>

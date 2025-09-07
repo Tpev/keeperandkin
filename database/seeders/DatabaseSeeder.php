@@ -15,6 +15,9 @@ class DatabaseSeeder extends Seeder
     {
         // User::factory(10)->withPersonalTeam()->create();
 		$this->call(AdminSeeder::class);
+		$this->call(EvalOptionParamsSeeder::class);
+		$this->call(EvalQuestionParamsSeeder::class);
+		$this->call(EvalQuestionParamsSeeder::class);
 
     }
 }

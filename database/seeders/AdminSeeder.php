@@ -2,38 +2,44 @@
 
 namespace Database\Seeders;
 
-use Illuminate\Database\Seeder;             // ← extends this
-use Illuminate\Support\Facades\Hash;
 use App\Models\User;
-use App\Enums\Role;
+use App\Models\Team;
+use Illuminate\Database\Seeder;
+use Illuminate\Support\Facades\Hash;
 
 class AdminSeeder extends Seeder
 {
     public function run(): void
     {
-        /* -----------------------------------------------------------------
-         | 1)  Create (or fetch) the global admin account
-         | ----------------------------------------------------------------- */
-        $admin = User::updateOrCreate(
+        $admin = \App\Models\User::firstOrCreate(
             ['email' => 'admin@example.com'],
             [
-                'name'     => 'Super Admin',
-                'password' => Hash::make('password'),
-                'role'     => Role::ADMIN,
+                'name' => 'Test Admin',
+                'password' => \Illuminate\Support\Facades\Hash::make('password'),
+                'is_admin' => true,
             ]
         );
 
-        /* -----------------------------------------------------------------
-         | 2)  Give that admin a shelter/team if they don’t have one yet
-         | ----------------------------------------------------------------- */
-        if (! $admin->ownedTeams()->exists()) {
-            $shelter = $admin->ownedTeams()->create([
-                'name'          => 'Main Shelter',
-                'personal_team' => false,   // organisation-style, not personal
-            ]);
+        // Create a personal team if missing
+        $team = Team::firstOrCreate(
+            ['user_id' => $admin->id, 'personal_team' => true],
+            ['name' => "{$admin->name}'s Team"]
+        );
 
-            $admin->current_team_id = $shelter->id;
-            $admin->save();
+        // Set as current team if not set
+        if (! $admin->current_team_id) {
+            $admin->forceFill(['current_team_id' => $team->id])->save();
+        }
+
+        // (Optional) ensure owner appears in pivot and marked as 'owner'
+        if (! \DB::table('team_user')->where('team_id', $team->id)->where('user_id', $admin->id)->exists()) {
+            \DB::table('team_user')->insert([
+                'team_id'    => $team->id,
+                'user_id'    => $admin->id,
+                'role'       => 'owner',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
         }
     }
 }

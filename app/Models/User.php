@@ -58,6 +58,7 @@ class User extends Authenticatable
             'email_verified_at' => 'datetime',
             'password'          => 'hashed',
             'role'              => Role::class,   // 👈 NEW (enum cast)
+			 'is_admin' => 'boolean',
         ];
     }
 

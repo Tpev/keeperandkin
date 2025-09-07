@@ -1,5 +1,6 @@
 <?php
 
+// app/Livewire/Dogs/Show.php
 namespace App\Livewire\Dogs;
 
 use Livewire\Component;
@@ -7,16 +8,17 @@ use App\Models\Dog;
 
 class Show extends Component
 {
-    public Dog $dog;               // passed in from the Blade page
+    public Dog $dog;
 
     public function mount(Dog $dog): void
     {
-        $this->dog = $dog;
+        $this->dog = $dog->loadMissing('latestEvaluation');
     }
 
     public function render()
     {
-        // This view is just the *inner* markup, no layout wrapper
-        return view('livewire.dogs.show');
+        return view('livewire.dogs.show', [
+            'latestEval' => $this->dog->latestEvaluation, // ✅ pass it
+        ]);
     }
 }
