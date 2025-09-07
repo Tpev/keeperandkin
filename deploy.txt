@@ -1,0 +1,7 @@
+cd /var/www/keeperandkin
+sudo -u www-data git pull origin main
+sudo -u www-data bash -lc "cd /var/www/keeperandkin && composer install --no-dev --optimize-autoloader"
+sudo -u www-data bash -lc "cd /var/www/keeperandkin && php artisan migrate --force"
+sudo -u www-data bash -lc "cd /var/www/keeperandkin && npm ci && npm run build"
+sudo -u www-data bash -lc "cd /var/www/keeperandkin && php artisan optimize && php artisan queue:restart"
+sudo systemctl reload nginx
