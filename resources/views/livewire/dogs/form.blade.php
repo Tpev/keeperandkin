@@ -22,11 +22,12 @@
             step="0.1"
             wire:model.defer="age"
         />
-<x-ts-input
-    label="Serial Number"
-    placeholder="e.g., SN-2024-0001"
-    wire:model.defer="serial_number"
-/>
+
+        <x-ts-input
+            label="Serial Number"
+            placeholder="e.g., SN-2024-0001"
+            wire:model.defer="serial_number"
+        />
 
         {{-- ===== Photo Upload (native input + preview + progress) ===== --}}
         <div class="space-y-2">
@@ -82,14 +83,20 @@
         </div>
         {{-- ===== /Photo Upload ===== --}}
 
-        <x-ts-select.native
-            label="Sex"
-            :options="[
+        {{-- Sex (default "male" even if user doesn't touch it) --}}
+        @php
+            $sexOptions = [
                 ['label' => 'Male',   'value' => 'male'],
                 ['label' => 'Female', 'value' => 'female'],
-            ]"
-            placeholder="—"
-            wire:model.defer="sex"
+            ];
+        @endphp
+
+        <x-ts-select.native
+            label="Sex"
+            :options="$sexOptions"
+            wire:model="sex"         {{-- not defer, so the default binds immediately --}}
+            :value="$sex ?? 'male'"  {{-- ensures initial value in UI --}}
+            :clearable="false"
         />
     </div>
 
