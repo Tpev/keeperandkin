@@ -19,8 +19,25 @@ class Dog extends Model
         'sex',
         'description',
 		'photo_path', 
+		        'location',
+        'approx_dob',
+        'fixed',
+        'color',
+        'size',
+        'microchip',
+        'heartworm',
+        'fiv_l',
+        'flv',
+        'housetrained',
+        'good_with_dogs',
+        'good_with_cats',
+        'good_with_children',
     ];
-
+    protected $casts = [
+        // existing casts...
+        'approx_dob' => 'date',   // store as DATE; render as m/d/Y in forms/views
+        'fixed'      => 'boolean',
+    ];
     /* Relationships */
     public function team()
     {
@@ -45,5 +62,28 @@ public function dietEntries()
     return $this->hasMany(\App\Models\DietEntry::class)->orderByDesc('fed_at');
 }
 
+   public function getApproxDobUsAttribute(): ?string
+    {
+        return $this->approx_dob?->format('m/d/Y');
+    }
+
+    // (Optional) Mutator to accept US-format input from forms:
+    public function setApproxDobAttribute($value): void
+    {
+        if (empty($value)) {
+            $this->attributes['approx_dob'] = null;
+            return;
+        }
+
+        // Accept m/d/Y or Y-m-d
+        $dt = \DateTime::createFromFormat('m/d/Y', $value)
+            ?: \DateTime::createFromFormat('Y-m-d', $value);
+
+        $this->attributes['approx_dob'] = $dt ? $dt->format('Y-m-d') : $value;
+    }
+
+public function transfer() {
+    return $this->hasMany(\App\Models\DogTransfer::class)->latest();
+}
 
 }

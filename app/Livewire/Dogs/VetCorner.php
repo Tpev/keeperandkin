@@ -1,27 +1,34 @@
 <?php
 
-// app/Livewire/Dogs/VetCorner.php
 namespace App\Livewire\Dogs;
 
 use Livewire\Component;
+use Livewire\WithFileUploads;
 use App\Models\Dog;
 use App\Models\VetMetric;
 use App\Models\VetVisit;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\Rule;
 
 class VetCorner extends Component
 {
+    use WithFileUploads;
+
     public Dog $dog;
 
     // Metrics form
-    public ?float $current_weight = null;
-    public ?int   $bcs = null; // 1–9
+    public ?float  $current_weight = null;
+    public ?int    $bcs = null; // 1–9
     public ?string $next_vaccine_date = null; // 'Y-m-d'
 
     // Visit form
     public ?string $visit_date = null;
     public ?string $reason = null;
     public ?string $outcome = null;
-    public ?float $visit_weight = null;
+    public ?float  $visit_weight = null;
+
+    /** @var \Livewire\Features\SupportFileUploads\TemporaryUploadedFile|null */
+    public $visit_file = null; // NEW: file upload
 
     public bool $showVisits = false;
 
@@ -60,19 +67,30 @@ class VetCorner extends Component
             'reason'       => ['required','string','max:160'],
             'outcome'      => ['nullable','string'],
             'visit_weight' => ['nullable','numeric','between:0,200'],
+            // Accept common medical docs & images; 10 MB max
+            'visit_file'   => ['nullable','file','max:10240', 'mimes:pdf,jpg,jpeg,png,heic,webp'],
         ]);
 
+        $path = null;
+        if ($this->visit_file) {
+            // Store on public disk so it can be downloaded
+            $folder = "vet-visits/{$this->dog->id}";
+            $path = $this->visit_file->store($folder, 'public'); // e.g., vet-visits/12/abc123.pdf
+        }
+
         VetVisit::create([
-            'dog_id'     => $this->dog->id,
-            'visit_date' => $data['visit_date'],
-            'reason'     => $data['reason'],
-            'outcome'    => $data['outcome'] ?? null,
-            'weight'     => $data['visit_weight'] ?? null,
+            'dog_id'        => $this->dog->id,
+            'visit_date'    => $data['visit_date'],
+            'reason'        => $data['reason'],
+            'outcome'       => $data['outcome'] ?? null,
+            'weight'        => $data['visit_weight'] ?? null,
+            'document_path' => $path,
         ]);
 
         // reset tiny form
         $this->visit_date = $this->reason = $this->outcome = null;
         $this->visit_weight = null;
+        $this->visit_file = null;
 
         $this->dispatch('toast', type: 'success', message: 'Visit added.');
         $this->dog->load('vetVisits');

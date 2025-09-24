@@ -1,5 +1,4 @@
 <form wire:submit.prevent="submit" class="space-y-10">
-  {{-- ===== Progress ring now shows COMPLETION, not score ===== --}}
   @php
     $circ = 2 * M_PI * 44; // r=44
     $offset = $circ - ($this->progressPercent / 100) * $circ;
@@ -21,9 +20,11 @@
       </div>
       <div>
         <p class="text-sm opacity-80">Progress (answered {{ $this->answeredQuestions }} / {{ $this->totalQuestions }})</p>
-        <p class="text-lg font-semibold">
-          Score: {{ $this->liveScore }} <span class="opacity-60">/ {{ $this->maxScore }}</span>
-        </p>
+        @if(!$this->useDbQuestions)
+          <p class="text-lg font-semibold">
+            Score: {{ $this->liveScore }} <span class="opacity-60">/ {{ $this->maxScore }}</span>
+          </p>
+        @endif
       </div>
     </div>
 
@@ -76,51 +77,129 @@
     </h3>
 
     <div class="space-y-5">
-      @foreach($this->currentQuestions as $qKey => $q)
-        <div wire:key="qrow-{{ $this->currentCategoryKey }}-{{ $qKey }}">
-          <p class="font-medium mb-2">{{ $q['text'] }}</p>
+      {{-- DB MODE --}}
+      @if($this->useDbQuestions)
+        @foreach($this->currentQuestions as $q)
+          @php
+            $qid = (int) ($q['id'] ?? 0);
+            $type = $q['type'] ?? null;
+            $opts = $q['options'] ?? [];
+          @endphp
 
-          @if(($q['type'] ?? null) === 'radio')
-            <div class="grid sm:grid-cols-1 gap-2">
-              @php $i=1; @endphp
-              @foreach(($q['options'] ?? []) as $optKey => $opt)
-                <label class="kk-opt cursor-pointer" wire:key="opt-{{ $qKey }}-{{ $optKey }}-{{ $this->step }}">
-                  <input type="radio"
-                         wire:model="answers.{{ $qKey }}"
-                         value="{{ $optKey }}"
-                         class="ts-radio mt-1"
-                         name="answers.{{ $qKey }}">
-                  @if(is_int($opt['score'] ?? null))
+          <div wire:key="db-qrow-{{ $qid }}">
+            <p class="font-medium mb-2">{{ $q['prompt'] ?? 'Question' }}</p>
+
+            @if(in_array($type, ['single_choice','boolean'], true))
+              <div class="grid sm:grid-cols-1 gap-2">
+                @php $i=1; @endphp
+                @foreach($opts as $opt)
+                  <label class="kk-opt cursor-pointer" wire:key="db-opt-{{ $qid }}-{{ $opt['id'] }}">
+                    <input type="radio"
+                           wire:model="answers.{{ $qid }}.answer_option_id"
+                           value="{{ $opt['id'] }}"
+                           class="ts-radio mt-1"
+                           name="answers.{{ $qid }}.answer_option_id">
                     <span class="kk-chip">{{ $i }}</span>
-                  @endif
-                  <span class="text-sm @if($optKey==='na') kk-na @endif">{{ $opt['label'] }}</span>
-                </label>
-                @php $i++; @endphp
-              @endforeach
-            </div>
+                    <span class="text-sm">{{ $opt['label'] }}</span>
+                  </label>
+                  @php $i++; @endphp
+                @endforeach
+              </div>
 
-          @elseif(($q['type'] ?? null) === 'checkbox')
-            <div class="grid sm:grid-cols-1 gap-2">
-              @foreach(($q['options'] ?? []) as $optKey => $opt)
-                <label class="kk-opt cursor-pointer" wire:key="opt-{{ $qKey }}-{{ $optKey }}-{{ $this->step }}">
-                  <input type="checkbox"
-                         wire:model="answers.{{ $qKey }}"
-                         value="{{ $optKey }}"
-                         name="answers.{{ $qKey }}[]"
-                         class="ts-checkbox mt-1">
-                  <span class="kk-chip">•</span>
-                  <span class="text-sm">{{ $opt['label'] }}</span>
-                </label>
-              @endforeach
-            </div>
-            <p class="kk-help mt-2">Select all that apply.</p>
-          @endif
+            @elseif($type === 'multi_choice')
+              <div class="grid sm:grid-cols-1 gap-2">
+                @foreach($opts as $opt)
+                  <label class="kk-opt cursor-pointer" wire:key="db-opt-{{ $qid }}-{{ $opt['id'] }}">
+                    <input type="checkbox"
+                           wire:model="answers.{{ $qid }}.answer_option_ids"
+                           value="{{ $opt['id'] }}"
+                           name="answers.{{ $qid }}.answer_option_ids[]"
+                           class="ts-checkbox mt-1">
+                    <span class="kk-chip">•</span>
+                    <span class="text-sm">{{ $opt['label'] }}</span>
+                  </label>
+                @endforeach
+              </div>
+              <p class="kk-help mt-2">Select all that apply.</p>
 
-          @error("answers.$qKey")
-            <p class="text-red-600 text-sm mt-1">{{ $message }}</p>
-          @enderror
-        </div>
-      @endforeach
+            @elseif($type === 'scale')
+              <div class="kk-opt">
+                <input type="number" step="1"
+                       wire:model.lazy="answers.{{ $qid }}.answer_value"
+                       class="border rounded px-2 py-1 w-24">
+                <span class="text-sm kk-help ml-2">
+                  {{ ($q['meta']['min'] ?? 0) }}–{{ ($q['meta']['max'] ?? 100) }}
+                  @if(($q['meta']['invert'] ?? false)===true) (inverted) @endif
+                </span>
+              </div>
+
+            @elseif($type === 'text')
+              <textarea wire:model.lazy="answers.{{ $qid }}.answer_text"
+                        class="w-full border rounded px-3 py-2"
+                        rows="3"></textarea>
+
+            @else
+              {{-- fallback custom --}}
+              <textarea wire:model.lazy="answers.{{ $qid }}.answer_json"
+                        class="w-full border rounded px-3 py-2"
+                        rows="2"
+                        placeholder="JSON"></textarea>
+            @endif
+
+            @error("answers.$qid".($type==='single_choice' || $type==='boolean' ? '.answer_option_id' : ($type==='multi_choice' ? '.answer_option_ids' : ($type==='scale' ? '.answer_value' : ($type==='text' ? '.answer_text' : '.answer_json')))))
+              <p class="text-red-600 text-sm mt-1">{{ $message }}</p>
+            @enderror
+          </div>
+        @endforeach
+
+      {{-- LEGACY MODE --}}
+      @else
+        @foreach($this->currentQuestions as $qKey => $q)
+          <div wire:key="legacy-qrow-{{ $this->currentCategoryKey }}-{{ $qKey }}">
+            <p class="font-medium mb-2">{{ $q['text'] }}</p>
+
+            @if(($q['type'] ?? null) === 'radio')
+              <div class="grid sm:grid-cols-1 gap-2">
+                @php $i=1; @endphp
+                @foreach(($q['options'] ?? []) as $optKey => $opt)
+                  <label class="kk-opt cursor-pointer" wire:key="legacy-opt-{{ $qKey }}-{{ $optKey }}-{{ $this->step }}">
+                    <input type="radio"
+                          wire:model="answers.{{ $qKey }}"
+                          value="{{ $optKey }}"
+                          class="ts-radio mt-1"
+                          name="answers.{{ $qKey }}">
+                    @if(is_int($opt['score'] ?? null))
+                      <span class="kk-chip">{{ $i }}</span>
+                    @endif
+                    <span class="text-sm @if($optKey==='na') kk-na @endif">{{ $opt['label'] }}</span>
+                  </label>
+                  @php $i++; @endphp
+                @endforeach
+              </div>
+
+            @elseif(($q['type'] ?? null) === 'checkbox')
+              <div class="grid sm:grid-cols-1 gap-2">
+                @foreach(($q['options'] ?? []) as $optKey => $opt)
+                  <label class="kk-opt cursor-pointer" wire:key="legacy-opt-{{ $qKey }}-{{ $optKey }}-{{ $this->step }}">
+                    <input type="checkbox"
+                          wire:model="answers.{{ $qKey }}"
+                          value="{{ $optKey }}"
+                          name="answers.{{ $qKey }}[]"
+                          class="ts-checkbox mt-1">
+                    <span class="kk-chip">•</span>
+                    <span class="text-sm">{{ $opt['label'] }}</span>
+                  </label>
+                @endforeach
+              </div>
+              <p class="kk-help mt-2">Select all that apply.</p>
+            @endif
+
+            @error("answers.$qKey")
+              <p class="text-red-600 text-sm mt-1">{{ $message }}</p>
+            @enderror
+          </div>
+        @endforeach
+      @endif
     </div>
   </section>
 
@@ -149,5 +228,4 @@
       </div>
     </div>
   </div>
-
 </form>

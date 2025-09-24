@@ -1,50 +1,50 @@
 <?php
 
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\Auth;
+
 use App\Livewire\Admin\Dashboard        as AdminDashboard;
 use App\Livewire\ShelterAdmin\Dashboard as ShelterDashboard;
 use App\Livewire\User\Dashboard         as UserDashboard;
-use App\Livewire\Admin\SystemBrowser;
+
+// ✅ Import the correct Livewire admin components
+use App\Livewire\Admin\SystemBrowser;   // <-- your existing class lives here
+use App\Livewire\Admin\EvalOptions;
+use App\Livewire\Admin\FormsIndex;
+use App\Livewire\Admin\FormBuilder;
+
 use App\Models\Dog;
-use Illuminate\Support\Facades\Auth;
+use App\Livewire\Transfers\AcceptTransfer;
+use App\Http\Controllers\TransferCancelController;
 
-Route::get('/', function () {
-    if (Auth::check()) {
-        return redirect()->route('dogs.index');
-    }
+Route::middleware(['web'])->group(function () {
+    // Accept page (guest can view but will be asked to login to proceed)
+    Route::get('/transfer/accept/{transfer}', AcceptTransfer::class)->name('transfers.accept');
 
-    return redirect()->route('login');
+    // Cancel by sender (auth)
+    Route::delete('/transfer/{transfer}/cancel', [TransferCancelController::class, '__invoke'])
+        ->middleware(['auth','verified'])->name('transfers.cancel');
 });
 
-/*
-|--------------------------------------------------------------------------
-| Public routes (no auth)
-|--------------------------------------------------------------------------
-| Jetstream/Fortify registers /login, /register, /forgot-password, etc.
-| Put any public landing/marketing pages here as well.
-*/
+/* Public landing redirect */
+Route::get('/', function () {
+    return Auth::check()
+        ? redirect()->route('dogs.index')
+        : redirect()->route('login');
+});
 
-// Example public landing (optional):
-// Route::view('/', 'landing')->name('landing');
-
-/*
-|--------------------------------------------------------------------------
-| Admin-only (must be logged in, verified, and admin)
-|--------------------------------------------------------------------------
-*/
+/* ---------------- Admin-only ---------------- */
 Route::middleware(['auth', 'verified', 'admin'])->group(function () {
     Route::get('/admin', SystemBrowser::class)->name('admin.index');
-    Route::get('/admin/eval-options', \App\Livewire\Admin\EvalOptions::class)
-        ->name('admin.eval.options');
+    Route::get('/admin/eval-options', EvalOptions::class)->name('admin.eval.options');
+
+    // Phase 5 — Evaluation Forms Admin
+    Route::get('/admin/forms', FormsIndex::class)->name('admin.forms.index');
+    Route::get('/admin/forms/{form}', FormBuilder::class)->name('admin.forms.edit');
 });
 
-/*
-|--------------------------------------------------------------------------
-| Authenticated app routes (login required → redirects guests to /login)
-|--------------------------------------------------------------------------
-*/
+/* ---------------- Authenticated app ---------------- */
 Route::middleware(['auth', 'verified'])->group(function () {
-    /* Dashboards */
     Route::get('/dashboard', UserDashboard::class)->name('dashboard');
 
     Route::middleware('can:admin-only')->prefix('admin')->group(function () {
@@ -58,13 +58,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     /* Dogs */
     Route::get('/dogs', fn () => view('dogs.index'))->name('dogs.index');
     Route::get('/dogs/create', fn () => view('dogs.create'))->name('dogs.create');
-
-    Route::get('/dogs/{dog}/evaluate', fn (Dog $dog) => view('dogs.evaluate', compact('dog')))
-        ->name('dogs.evaluate');
-
-    Route::get('/dogs/{dog}/edit', fn (Dog $dog) => view('dogs.edit', compact('dog')))
-        ->name('dogs.edit');
-
-    Route::get('/dogs/{dog}', fn (Dog $dog) => view('dogs.show', compact('dog')))
-        ->name('dogs.show'); // protected
+    Route::get('/dogs/{dog}/evaluate', fn (Dog $dog) => view('dogs.evaluate', compact('dog')))->name('dogs.evaluate');
+    Route::get('/dogs/{dog}/edit', fn (Dog $dog) => view('dogs.edit', compact('dog')))->name('dogs.edit');
+    Route::get('/dogs/{dog}', fn (Dog $dog) => view('dogs.show', compact('dog')))->name('dogs.show');
 });

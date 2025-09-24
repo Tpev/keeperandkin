@@ -18,6 +18,11 @@ protected $casts = [
 
     public function dog()  { return $this->belongsTo(Dog::class); }
     public function user() { return $this->belongsTo(User::class); }
+	public function form()
+{
+    return $this->belongsTo(\App\Models\EvaluationForm::class, 'evaluation_form_id');
+}
+
 }
 
 

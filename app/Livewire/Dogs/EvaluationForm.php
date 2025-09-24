@@ -9,6 +9,11 @@ use App\Models\EvaluationOptionParam;
 use Illuminate\Support\Facades\Auth;
 use App\Support\DogEvalCatalog;
 
+// Phase 4 additions
+use App\Services\Evaluation\FormProvider;
+use App\Actions\Evaluations\PersistEvaluationResponses;
+use App\Models\EvaluationForm as DbEvaluationForm;
+
 class EvaluationForm extends Component
 {
     public Dog $dog;
@@ -16,21 +21,95 @@ class EvaluationForm extends Component
     /** Wizard state (1..N) */
     public int $step = 1;
 
-    /** User selections: radio => string, checkbox => array */
+    /**
+     * Unified answers structure:
+     * - DB path: keyed by question_id (int) -> payload per type
+     *   - single_choice/boolean: ['answer_option_id' => int]
+     *   - multi_choice: ['answer_option_ids' => int[]]
+     *   - scale: ['answer_value' => number]
+     *   - text: ['answer_text' => string]
+     *
+     * - Legacy path: your existing structure keyed by qKey (string) -> radio string | checkbox array
+     */
     public array $answers = [];
+
+    /** ------- Phase 4 state ------- */
+    public bool $useDbQuestions = false;
+
+    // DB form dto: ['form'=>['id','name','version'], 'sections'=>[ ['id','title','position','questions'=>[...]] ]]
+    public array $dbFormDto = [];
+
+    // Flattened helper maps for DB path
+    protected array $dbQuestionsById = [];       // qid => question array
+    protected array $dbOptionsByQid = [];        // qid => [option array...]
+    protected array $dbRequiredQids  = [];       // list of required qids (visibility=always only)
 
     /* ---------- lifecycle ---------- */
 
-    public function mount(Dog $dog): void
+    public function mount(Dog $dog, FormProvider $forms): void
     {
         $this->dog = $dog;
 
-        // Initialize all checkbox questions as empty arrays
-        foreach (config('dog_eval', []) as $category) {
-            foreach ($category as $key => $q) {
-                if (($q['type'] ?? null) === 'checkbox') {
-                    if (!isset($this->answers[$key]) || !is_array($this->answers[$key])) {
-                        $this->answers[$key] = [];
+        $this->useDbQuestions = (bool) config('kk.features.db_questions', false);
+
+        if ($this->useDbQuestions) {
+            // Load DB form (team-specific if you add team scoping)
+            $dto = $forms->activeFormForTeam(null);
+            $this->dbFormDto = $dto ?? ['form'=>null,'sections'=>[]];
+
+            // Build lookup tables and initialize answers for multi_choice/text/scale
+            $this->hydrateDbLookupsAndDefaults();
+        } else {
+            // LEGACY: your old init for checkboxes
+            foreach (config('dog_eval', []) as $category) {
+                foreach ($category as $key => $q) {
+                    if (($q['type'] ?? null) === 'checkbox') {
+                        if (!isset($this->answers[$key]) || !is_array($this->answers[$key])) {
+                            $this->answers[$key] = [];
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /** Build DB lookups, wizard steps, and default answer structures for DB path */
+    protected function hydrateDbLookupsAndDefaults(): void
+    {
+        $this->dbQuestionsById = [];
+        $this->dbOptionsByQid  = [];
+        $this->dbRequiredQids  = [];
+
+        foreach (($this->dbFormDto['sections'] ?? []) as $section) {
+            foreach (($section['questions'] ?? []) as $q) {
+                $qid = (int) $q['id'];
+                $this->dbQuestionsById[$qid] = $q;
+                $this->dbOptionsByQid[$qid]  = $q['options'] ?? [];
+
+                if (!empty($q['required']) && ($q['visibility'] ?? 'always') === 'always') {
+                    $this->dbRequiredQids[] = $qid;
+                }
+
+                // Initialize empty structures for known types (only if not set yet)
+                if (!array_key_exists($qid, $this->answers)) {
+                    switch ($q['type']) {
+                        case 'multi_choice':
+                            $this->answers[$qid] = ['answer_option_ids' => []];
+                            break;
+                        case 'scale':
+                            $this->answers[$qid] = ['answer_value' => null];
+                            break;
+                        case 'text':
+                            $this->answers[$qid] = ['answer_text' => ''];
+                            break;
+                        case 'single_choice':
+                        case 'boolean':
+                            $this->answers[$qid] = ['answer_option_id' => null];
+                            break;
+                        default:
+                            // custom
+                            $this->answers[$qid] = ['answer_json' => null];
+                            break;
                     }
                 }
             }
@@ -39,228 +118,112 @@ class EvaluationForm extends Component
 
     /* ---------- derived props (catalog & wizard) ---------- */
 
-    /** Entire catalog from config (grouped by category) */
+    /** Entire catalog from config (grouped by category) — LEGACY path only */
     public function getCatalogProperty(): array
     {
         return DogEvalCatalog::catalog();
     }
 
-    /** Flat list of question keys (for param queries) */
+    /** For legacy-only param queries */
     public function getQuestionKeysProperty(): array
     {
         return collect($this->catalog)->flatMap(fn ($group) => array_keys($group))->values()->all();
     }
 
     /**
-     * Map of per-option admin params keyed by "question|option":
-     *  [ 'q_key|opt_key' => ['weight'=>int,'flags'=>array] ]
+     * Map of per-option admin params keyed by "question|option" — LEGACY path only
+     *   [ 'q_key|opt_key' => ['weight'=>int,'red_flags'=>array] ]
      */
-public function getParamMapProperty(): array
-{
-    $rows = EvaluationOptionParam::whereIn('question_key', $this->questionKeys)->get();
+    public function getParamMapProperty(): array
+    {
+        if ($this->useDbQuestions) return []; // not used in DB path
+        $rows = \App\Models\EvaluationOptionParam::whereIn('question_key', $this->questionKeys)->get();
 
-    $map = [];
-    foreach ($rows as $p) {
-        // thanks to model casts this is already an array, but be defensive
-        $red = is_array($p->red_flags) ? $p->red_flags : (json_decode($p->red_flags ?? '[]', true) ?: []);
-
-        $map[$p->question_key.'|'.$p->option_key] = [
-            'weight'     => (int) ($p->weight ?? 1),
-            'red_flags'  => array_values(array_filter($red)),
-        ];
+        $map = [];
+        foreach ($rows as $p) {
+            $red = is_array($p->red_flags) ? $p->red_flags : (json_decode($p->red_flags ?? '[]', true) ?: []);
+            $map[$p->question_key.'|'.$p->option_key] = [
+                'weight'     => (int) ($p->weight ?? 1),
+                'red_flags'  => array_values(array_filter($red)),
+            ];
+        }
+        return $map;
     }
-    return $map;
-}
 
-
-    /** Step count = number of top-level categories */
+    /** Step count */
     public function getStepsCountProperty(): int
     {
+        if ($this->useDbQuestions) {
+            return count($this->dbFormDto['sections'] ?? []);
+        }
         return count($this->catalog);
     }
 
-    /** Ordered category keys: e.g. ["Confidence","Sociability","Trainability"] */
+    /** Ordered category keys/names (section titles) */
     public function getCategoryKeysProperty(): array
     {
+        if ($this->useDbQuestions) {
+            return collect($this->dbFormDto['sections'] ?? [])->pluck('title')->all();
+        }
         return array_keys($this->catalog);
     }
 
-    /** Current category key based on $step (1-indexed) */
+    /** Current category key based on $step (1-indexed) -> section title */
     public function getCurrentCategoryKeyProperty(): ?string
     {
         return $this->categoryKeys[$this->step - 1] ?? null;
     }
 
-    /** Questions for current category */
+    /** Questions for current category (shape differs per path) */
     public function getCurrentQuestionsProperty(): array
     {
+        if ($this->useDbQuestions) {
+            $sec = ($this->dbFormDto['sections'][$this->step - 1] ?? null);
+            return $sec['questions'] ?? [];
+        }
         return $this->catalog[$this->currentCategoryKey] ?? [];
     }
 
-    /* ---------- scoring ---------- */
-/** Per-category live (raw) score based on current answers */
-public function getCategoryRawScoresProperty(): array
-{
-    $out = [];
-
-    foreach ($this->catalog as $catName => $group) {
-        $raw = 0;
-
-        foreach ($group as $qKey => $q) {
-            if (($q['type'] ?? null) !== 'radio') continue;
-
-            $selected = $this->answers[$qKey] ?? null;
-            if ($selected === null || $selected === '') continue;
-
-            $optMeta = $q['options'][$selected] ?? null;
-            $base = (is_array($optMeta) && array_key_exists('score', $optMeta) && is_int($optMeta['score']))
-                ? $optMeta['score']
-                : 0;
-
-            if ($base <= 0) continue;
-
-            $w = (int) ($this->paramMap[$qKey.'|'.$selected]['weight'] ?? 1);
-            $w = max(1, $w);
-
-            $raw += $base * $w;
-        }
-
-        $out[$catName] = $raw;
-    }
-
-    return $out;
-}
-
-/** Per-category maximum possible score (radio questions only) */
-public function getCategoryMaxScoresProperty(): array
-{
-    $out = [];
-
-    foreach ($this->catalog as $catName => $group) {
-        $maxCat = 0;
-
-        foreach ($group as $qKey => $q) {
-            if (($q['type'] ?? null) !== 'radio') continue;
-
-            $maxForQuestion = 0;
-            foreach (($q['options'] ?? []) as $optKey => $optMeta) {
-                $base = (is_array($optMeta) && array_key_exists('score', $optMeta) && is_int($optMeta['score']))
-                    ? $optMeta['score']
-                    : 0;
-
-                if ($base <= 0) continue;
-
-                $w = (int) ($this->paramMap[$qKey.'|'.$optKey]['weight'] ?? 1);
-                $w = max(1, $w);
-
-                $maxForQuestion = max($maxForQuestion, $base * $w);
-            }
-
-            $maxCat += $maxForQuestion;
-        }
-
-        $out[$catName] = $maxCat;
-    }
-
-    return $out;
-}
-
-/** Per-category normalized % (0..100) for the three big categories */
-public function getCategoryPercentsProperty(): array
-{
-    $raw  = $this->categoryRawScores;
-    $max  = $this->categoryMaxScores;
-
-    $toPercent = function (int $r, int $m): int {
-        return $m > 0 ? (int) round(($r / $m) * 100) : 0;
-    };
-
-    $out = [];
-    foreach ($this->catalog as $catName => $group) {
-        $out[$catName] = $toPercent((int) ($raw[$catName] ?? 0), (int) ($max[$catName] ?? 0));
-    }
-
-    return $out;
-}
-
-/** Global normalized % (0..100) */
-public function getGlobalPercentProperty(): int
-{
-    return $this->maxScore > 0
-        ? (int) round(($this->liveScore / $this->maxScore) * 100)
-        : 0;
-}
-
-    /** Max possible score across all radio questions (uses DB weights; ignores null scores like N/A) */
-    public function getMaxScoreProperty(): int
-    {
-        $total = 0;
-
-        foreach ($this->catalog as $group) {
-            foreach ($group as $qKey => $q) {
-                if (($q['type'] ?? null) !== 'radio') continue;
-
-                $maxForQuestion = 0;
-
-                foreach (($q['options'] ?? []) as $optKey => $optMeta) {
-                    $base = (is_array($optMeta) && array_key_exists('score', $optMeta) && is_int($optMeta['score']))
-                        ? $optMeta['score']
-                        : 0;
-
-                    if ($base <= 0) continue;
-
-                    $w = (int) ($this->paramMap[$qKey.'|'.$optKey]['weight'] ?? 1);
-                    $w = max(1, $w);
-
-                    $maxForQuestion = max($maxForQuestion, $base * $w);
-                }
-
-                $total += $maxForQuestion;
-            }
-        }
-
-        return $total;
-    }
-
-    /** Live score based on current answers (radio only; checkbox not scored here) */
-    public function getLiveScoreProperty(): int
-    {
-        $score = 0;
-        $flat  = collect($this->catalog)->flatMap(fn ($group) => $group);
-
-        foreach ($this->answers as $qKey => $optValue) {
-            $question = $flat[$qKey] ?? null;
-            if (!$question || ($question['type'] ?? null) !== 'radio') continue;
-
-            $optMeta = $question['options'][$optValue] ?? null;
-
-            $base = (is_array($optMeta) && array_key_exists('score', $optMeta) && is_int($optMeta['score']))
-                ? $optMeta['score']
-                : 0;
-
-            if ($base <= 0) continue;
-
-            $w = (int) ($this->paramMap[$qKey.'|'.$optValue]['weight'] ?? 1);
-            $w = max(1, $w);
-
-            $score += $base * $w;
-        }
-
-        return $score;
-    }
-
-    /* ---------- completion progress ---------- */
+    /* ---------- progress (shared UI) ---------- */
 
     public function getTotalQuestionsProperty(): int
     {
+        if ($this->useDbQuestions) {
+            return collect($this->dbFormDto['sections'] ?? [])
+                   ->sum(fn ($s) => count($s['questions'] ?? []));
+        }
         return collect($this->catalog)->sum(fn ($group) => count($group));
     }
 
     public function getAnsweredQuestionsProperty(): int
     {
+        if ($this->useDbQuestions) {
+            $answered = 0;
+            foreach (($this->dbFormDto['sections'] ?? []) as $s) {
+                foreach (($s['questions'] ?? []) as $q) {
+                    $qid = (int) $q['id'];
+                    $t   = $q['type'] ?? null;
+                    $ans = $this->answers[$qid] ?? null;
+
+                    if ($t === 'single_choice' || $t === 'boolean') {
+                        if (is_array($ans) && !empty($ans['answer_option_id'])) $answered++;
+                    } elseif ($t === 'multi_choice') {
+                        if (is_array($ans) && !empty($ans['answer_option_ids'])) $answered++;
+                    } elseif ($t === 'scale') {
+                        if (is_array($ans) && is_numeric($ans['answer_value'])) $answered++;
+                    } elseif ($t === 'text') {
+                        if (is_array($ans) && is_string($ans['answer_text']) && $ans['answer_text'] !== '') $answered++;
+                    } else {
+                        if (is_array($ans) && array_key_exists('answer_json', $ans) && $ans['answer_json'] !== null) $answered++;
+                    }
+                }
+            }
+            return $answered;
+        }
+
+        // Legacy
         $flat = collect($this->catalog)->flatMap(fn ($group) => $group);
         $answered = 0;
-
         foreach ($flat as $key => $q) {
             $type = $q['type'] ?? null;
             if ($type === 'radio') {
@@ -288,6 +251,40 @@ public function getGlobalPercentProperty(): int
 
     public function rules(): array
     {
+        if ($this->useDbQuestions) {
+            // Only enforce required questions (visibility=always)
+            $rules = [];
+            foreach (($this->dbFormDto['sections'] ?? []) as $s) {
+                foreach (($s['questions'] ?? []) as $q) {
+                    if (!($q['required'] ?? false) || ($q['visibility'] ?? 'always') !== 'always') continue;
+                    $qid = (int) $q['id'];
+                    switch ($q['type']) {
+                        case 'single_choice':
+                        case 'boolean':
+                            $validIds = collect($q['options'] ?? [])->pluck('id')->implode(',');
+                            $rules["answers.$qid.answer_option_id"] = ['required', "in:$validIds"];
+                            break;
+                        case 'multi_choice':
+                            $validIds = collect($q['options'] ?? [])->pluck('id')->implode(',');
+                            $rules["answers.$qid.answer_option_ids"] = ['required','array'];
+                            $rules["answers.$qid.answer_option_ids.*"] = ["in:$validIds"];
+                            break;
+                        case 'scale':
+                            $rules["answers.$qid.answer_value"] = ['required','numeric'];
+                            break;
+                        case 'text':
+                            $rules["answers.$qid.answer_text"] = ['required','string'];
+                            break;
+                        default:
+                            $rules["answers.$qid.answer_json"] = ['nullable']; // custom
+                            break;
+                    }
+                }
+            }
+            return $rules;
+        }
+
+        // Legacy rules
         $rules = [];
         foreach ($this->catalog as $category) {
             foreach ($category as $key => $q) {
@@ -304,6 +301,38 @@ public function getGlobalPercentProperty(): int
     public function rulesStep(int $step = null): array
     {
         $step = $step ?: $this->step;
+
+        if ($this->useDbQuestions) {
+            $sec = $this->dbFormDto['sections'][$step - 1] ?? null;
+            if (!$sec) return [];
+
+            $rules = [];
+            foreach (($sec['questions'] ?? []) as $q) {
+                if (!($q['required'] ?? false) || ($q['visibility'] ?? 'always') !== 'always') continue;
+                $qid = (int) $q['id'];
+                switch ($q['type']) {
+                    case 'single_choice':
+                    case 'boolean':
+                        $validIds = collect($q['options'] ?? [])->pluck('id')->implode(',');
+                        $rules["answers.$qid.answer_option_id"] = ['required', "in:$validIds"];
+                        break;
+                    case 'multi_choice':
+                        $validIds = collect($q['options'] ?? [])->pluck('id')->implode(',');
+                        $rules["answers.$qid.answer_option_ids"] = ['required','array'];
+                        $rules["answers.$qid.answer_option_ids.*"] = ["in:$validIds"];
+                        break;
+                    case 'scale':
+                        $rules["answers.$qid.answer_value"] = ['required','numeric'];
+                        break;
+                    case 'text':
+                        $rules["answers.$qid.answer_text"] = ['required','string'];
+                        break;
+                }
+            }
+            return $rules;
+        }
+
+        // Legacy step rules
         $rules = [];
         $catKey = $this->categoryKeys[$step - 1] ?? null;
         if (!$catKey) return $rules;
@@ -320,9 +349,42 @@ public function getGlobalPercentProperty(): int
 
     protected function rulesUpTo(int $upto): array
     {
-        $rules = [];
         $upto = max(1, min($upto, $this->stepsCount));
 
+        if ($this->useDbQuestions) {
+            $rules = [];
+            for ($i = 1; $i <= $upto; $i++) {
+                $sec = $this->dbFormDto['sections'][$i - 1] ?? null;
+                if (!$sec) continue;
+
+                foreach (($sec['questions'] ?? []) as $q) {
+                    if (!($q['required'] ?? false) || ($q['visibility'] ?? 'always') !== 'always') continue;
+                    $qid = (int) $q['id'];
+                    switch ($q['type']) {
+                        case 'single_choice':
+                        case 'boolean':
+                            $validIds = collect($q['options'] ?? [])->pluck('id')->implode(',');
+                            $rules["answers.$qid.answer_option_id"] = ['required', "in:$validIds"];
+                            break;
+                        case 'multi_choice':
+                            $validIds = collect($q['options'] ?? [])->pluck('id')->implode(',');
+                            $rules["answers.$qid.answer_option_ids"] = ['required','array'];
+                            $rules["answers.$qid.answer_option_ids.*"] = ["in:$validIds"];
+                            break;
+                        case 'scale':
+                            $rules["answers.$qid.answer_value"] = ['required','numeric'];
+                            break;
+                        case 'text':
+                            $rules["answers.$qid.answer_text"] = ['required','string'];
+                            break;
+                    }
+                }
+            }
+            return $rules;
+        }
+
+        // Legacy up-to rules
+        $rules = [];
         for ($i = 1; $i <= $upto; $i++) {
             $catKey = $this->categoryKeys[$i - 1] ?? null;
             if (!$catKey) continue;
@@ -335,7 +397,6 @@ public function getGlobalPercentProperty(): int
                 }
             }
         }
-
         return $rules;
     }
 
@@ -375,11 +436,35 @@ public function getGlobalPercentProperty(): int
 
     /* ---------- save ---------- */
 
-    public function submit(): void
+    public function submit(PersistEvaluationResponses $persist): void
     {
-        // Ensure everything is valid before saving
         $this->validate($this->rules());
 
+        if ($this->useDbQuestions) {
+            // DB PATH
+            /** @var DbEvaluationForm $form */
+            $formId = (int) ($this->dbFormDto['form']['id'] ?? 0);
+            $form   = DbEvaluationForm::findOrFail($formId);
+
+            // Create a bare evaluation row (same way as legacy does)
+            $evaluation = Evaluation::create([
+                'dog_id'  => $this->dog->id,
+                'user_id' => Auth::id(),
+                // keep other columns nullable; Phase 2 action will fill category_scores & red_flags
+            ]);
+
+            // $payload is already in the expected action shape: answers keyed by question_id
+            $payload = $this->answers;
+
+            // Persist & score
+            $persist->handle($evaluation, $form, $payload);
+
+            session()->flash('success', "Evaluation saved.");
+            $this->redirectRoute('dogs.show', $this->dog);
+            return;
+        }
+
+        // LEGACY PATH (unchanged from your original)
         // Build selected options per question
         $selectedByQ = [];
         $flat = collect($this->catalog)->flatMap(fn ($g) => $g);
@@ -395,38 +480,144 @@ public function getGlobalPercentProperty(): int
                 if (is_array($opts) && $opts) $selectedByQ[$qKey] = array_values($opts);
             }
         }
-$globalPercent     = $this->globalPercent;        
-$categoryPercents  = $this->categoryPercents; 
-// 🔴 Aggregate red_flags (no allow-list filtering)
-$redFlags = [];
-foreach ($selectedByQ as $qKey => $optKeys) {
-    foreach ($optKeys as $optKey) {
-        $p = $this->paramMap[$qKey.'|'.$optKey] ?? null;
-        if (!$p) continue;
 
-        foreach ((array) ($p['red_flags'] ?? []) as $flag) {
-            if ($flag !== null && $flag !== '') {
-                $redFlags[] = $flag;
+        $globalPercent     = $this->globalPercent;        // from legacy getters (kept below)
+        $categoryPercents  = $this->categoryPercents;
+
+        // Aggregate red flags from EvaluationOptionParam (legacy)
+        $redFlags = [];
+        foreach ($selectedByQ as $qKey => $optKeys) {
+            foreach ($optKeys as $optKey) {
+                $p = $this->paramMap[$qKey.'|'.$optKey] ?? null;
+                if (!$p) continue;
+                foreach ((array) ($p['red_flags'] ?? []) as $flag) {
+                    if ($flag !== null && $flag !== '') $redFlags[] = $flag;
+                }
             }
         }
-    }
-}
-$redFlags = array_values(array_unique($redFlags));
-
+        $redFlags = array_values(array_unique($redFlags));
 
         Evaluation::create([
-            'dog_id'    => $this->dog->id,
-            'user_id'   => Auth::id(),
-                'score'           => $globalPercent,       // ✅ 0..100
-    'category_scores' => $categoryPercents,    // ✅ per big category
-            'answers'   => $this->answers,
-            'red_flags' => $redFlags, // ✅ snapshot from taxonomy-backed admin flags
+            'dog_id'          => $this->dog->id,
+            'user_id'         => Auth::id(),
+            'score'           => $globalPercent,
+            'category_scores' => $categoryPercents,
+            'answers'         => $this->answers,
+            'red_flags'       => $redFlags,
         ]);
 
         session()->flash('success', "Evaluation saved (score {$this->liveScore} / {$this->maxScore})");
-
         $this->redirectRoute('dogs.show', $this->dog);
     }
+
+    /* ---------- LEGACY scoring helpers (kept intact) ---------- */
+
+    public function getCategoryRawScoresProperty(): array
+    {
+        if ($this->useDbQuestions) return [];
+        $out = [];
+        foreach ($this->catalog as $catName => $group) {
+            $raw = 0;
+            foreach ($group as $qKey => $q) {
+                if (($q['type'] ?? null) !== 'radio') continue;
+                $selected = $this->answers[$qKey] ?? null;
+                if ($selected === null || $selected === '') continue;
+                $optMeta = $q['options'][$selected] ?? null;
+                $base = (is_array($optMeta) && array_key_exists('score', $optMeta) && is_int($optMeta['score'])) ? $optMeta['score'] : 0;
+                if ($base <= 0) continue;
+                $w = (int) ($this->paramMap[$qKey.'|'.$selected]['weight'] ?? 1);
+                $w = max(1, $w);
+                $raw += $base * $w;
+            }
+            $out[$catName] = $raw;
+        }
+        return $out;
+    }
+
+    public function getCategoryMaxScoresProperty(): array
+    {
+        if ($this->useDbQuestions) return [];
+        $out = [];
+        foreach ($this->catalog as $catName => $group) {
+            $maxCat = 0;
+            foreach ($group as $qKey => $q) {
+                if (($q['type'] ?? null) !== 'radio') continue;
+                $maxForQuestion = 0;
+                foreach (($q['options'] ?? []) as $optKey => $optMeta) {
+                    $base = (is_array($optMeta) && array_key_exists('score', $optMeta) && is_int($optMeta['score'])) ? $optMeta['score'] : 0;
+                    if ($base <= 0) continue;
+                    $w = (int) ($this->paramMap[$qKey.'|'.$optKey]['weight'] ?? 1);
+                    $w = max(1, $w);
+                    $maxForQuestion = max($maxForQuestion, $base * $w);
+                }
+                $maxCat += $maxForQuestion;
+            }
+            $out[$catName] = $maxCat;
+        }
+        return $out;
+    }
+
+    public function getCategoryPercentsProperty(): array
+    {
+        if ($this->useDbQuestions) return [];
+        $raw = $this->categoryRawScores;
+        $max = $this->categoryMaxScores;
+        $toPercent = fn (int $r, int $m) => $m > 0 ? (int) round(($r / $m) * 100) : 0;
+        $out = [];
+        foreach ($this->catalog as $catName => $group) {
+            $out[$catName] = $toPercent((int) ($raw[$catName] ?? 0), (int) ($max[$catName] ?? 0));
+        }
+        return $out;
+    }
+
+    public function getGlobalPercentProperty(): int
+    {
+        if ($this->useDbQuestions) return 0;
+        return $this->maxScore > 0
+            ? (int) round(($this->liveScore / $this->maxScore) * 100)
+            : 0;
+    }
+
+    public function getMaxScoreProperty(): int
+    {
+        if ($this->useDbQuestions) return 0;
+        $total = 0;
+        foreach ($this->catalog as $group) {
+            foreach ($group as $qKey => $q) {
+                if (($q['type'] ?? null) !== 'radio') continue;
+                $maxForQuestion = 0;
+                foreach (($q['options'] ?? []) as $optKey => $optMeta) {
+                    $base = (is_array($optMeta) && array_key_exists('score', $optMeta) && is_int($optMeta['score'])) ? $optMeta['score'] : 0;
+                    if ($base <= 0) continue;
+                    $w = (int) ($this->paramMap[$qKey.'|'.$optKey]['weight'] ?? 1);
+                    $w = max(1, $w);
+                    $maxForQuestion = max($maxForQuestion, $base * $w);
+                }
+                $total += $maxForQuestion;
+            }
+        }
+        return $total;
+    }
+
+    public function getLiveScoreProperty(): int
+    {
+        if ($this->useDbQuestions) return 0;
+        $score = 0;
+        $flat  = collect($this->catalog)->flatMap(fn ($group) => $group);
+        foreach ($this->answers as $qKey => $optValue) {
+            $question = $flat[$qKey] ?? null;
+            if (!$question || ($question['type'] ?? null) !== 'radio') continue;
+            $optMeta = $question['options'][$optValue] ?? null;
+            $base = (is_array($optMeta) && array_key_exists('score', $optMeta) && is_int($optMeta['score'])) ? $optMeta['score'] : 0;
+            if ($base <= 0) continue;
+            $w = (int) ($this->paramMap[$qKey.'|'.$optValue]['weight'] ?? 1);
+            $w = max(1, $w);
+            $score += $base * $w;
+        }
+        return $score;
+    }
+
+    /* ---------- render ---------- */
 
     public function render()
     {
