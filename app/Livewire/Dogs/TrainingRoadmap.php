@@ -38,7 +38,7 @@ class TrainingRoadmap extends Component
                 'category' => $LABEL_CC,
                 'title'    => 'Acclimation',
                 'goal'     => 'Relax in kennel with handler present (2 min)',
-                'youtube'  => 'https://www.youtube.com/embed/dQw4w9WgXcQ?si=RAWHCkyKh5Z4pJ0U',
+                'youtube'  => 'https://youtu.be/-JgU_ozVAc0?si=kHFxwSwdquX1Fm8N',
             ],
             [
                 'category' => $LABEL_CC,
@@ -50,7 +50,7 @@ class TrainingRoadmap extends Component
                 'category' => $LABEL_CC,
                 'title'    => 'Startle recovery',
                 'goal'     => 'Bounce-back under 5 seconds',
-                'youtube'  => 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+                'youtube'  => 'https://youtu.be/-JgU_ozVAc0?si=kHFxwSwdquX1Fm8N',
             ],
             [
                 'category' => $LABEL_SO,
@@ -62,7 +62,7 @@ class TrainingRoadmap extends Component
                 'category' => $LABEL_SO,
                 'title'    => 'Handler focus',
                 'goal'     => 'Hold eye contact 5 seconds',
-                'youtube'  => 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+                'youtube'  => 'https://youtu.be/-JgU_ozVAc0?si=kHFxwSwdquX1Fm8N',
             ],
             [
                 'category' => $LABEL_TR,
@@ -74,7 +74,7 @@ class TrainingRoadmap extends Component
                 'category' => $LABEL_TR,
                 'title'    => 'Loose leash',
                 'goal'     => 'Walk 20 m without pulling',
-                'youtube'  => 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+                'youtube'  => 'https://youtu.be/-JgU_ozVAc0?si=kHFxwSwdquX1Fm8N',
             ],
             [
                 'category' => $LABEL_TR,

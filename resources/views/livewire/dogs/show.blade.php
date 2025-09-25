@@ -36,7 +36,7 @@
     $SCALE_OK     = '#94A3B8';  // slate-400 (unknown/missing)
     $SCALE_RED    = '#DC2626';  // 0–25
     $SCALE_ORANGE = '#F97316';  // 26–50
-    $SCALE_YELLOW = '#F59E0B';  // 51–75
+    $SCALE_YELLOW = '#FFCC00';  // 51–75
     $SCALE_GREEN  = '#16A34A';  // 76–100
 
     // Pull what we have from $dog, fallback to placeholders
