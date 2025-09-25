@@ -85,5 +85,18 @@ public function dietEntries()
 public function transfer() {
     return $this->hasMany(\App\Models\DogTransfer::class)->latest();
 }
+public function getPhotoUrlAttribute(): ?string
+{
+    if ($this->photo_path) {
+        return asset('storage/' . ltrim($this->photo_path, '/'));
+    }
+
+    // Legacy fallback if some rows accidentally wrote to a `photo` column
+    if (array_key_exists('photo', $this->attributes) && $this->attributes['photo']) {
+        return asset('storage/' . ltrim($this->attributes['photo'], '/'));
+    }
+
+    return null;
+}
 
 }

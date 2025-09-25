@@ -3,11 +3,15 @@
 namespace App\Livewire\Dogs;
 
 use Livewire\Component;
+use Livewire\WithFileUploads;
 use App\Models\Dog;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 
 class Edit extends Component
 {
+    use WithFileUploads;
+
     public Dog $dog;
 
     // Core
@@ -20,8 +24,8 @@ class Edit extends Component
 
     // New fields
     public $location;
-    public $approx_dob;
-    public $fixed;
+    public $approx_dob;      // shown as m/d/Y in the form; model mutator accepts m/d/Y or Y-m-d
+    public $fixed;           // '', '1', '0' | true/false/null accepted by rules
     public $color;
     public $size;
     public $microchip;
@@ -34,6 +38,9 @@ class Edit extends Component
     public $good_with_dogs;
     public $good_with_cats;
     public $good_with_children;
+
+    /** @var \Livewire\Features\SupportFileUploads\TemporaryUploadedFile|null */
+    public $new_photo = null;  // for uploading a new profile picture
 
     protected function rules(): array
     {
@@ -60,6 +67,9 @@ class Edit extends Component
             'good_with_dogs'    => ['nullable','string','max:255'],
             'good_with_cats'    => ['nullable','string','max:255'],
             'good_with_children'=> ['nullable','string','max:255'],
+
+            // New photo (optional)
+            'new_photo'         => ['nullable','image','max:4096'], // 4MB
         ];
     }
 
@@ -77,8 +87,8 @@ class Edit extends Component
 
         // New
         $this->location          = $dog->location;
-        $this->approx_dob        = $dog->approx_dob?->format('m/d/Y'); // display US format
-        $this->fixed             = $dog->fixed;
+        $this->approx_dob        = $dog->approx_dob?->format('m/d/Y'); // show as US format
+        $this->fixed             = $dog->fixed;                        // can be null/true/false
         $this->color             = $dog->color;
         $this->size              = $dog->size;
         $this->microchip         = $dog->microchip;
@@ -101,17 +111,32 @@ class Edit extends Component
         if ($data['fixed'] === '' || $data['fixed'] === null) {
             $data['fixed'] = null;
         } else {
-            $data['fixed'] = in_array((string) $data['fixed'], ['1','true'], true) ? true : false;
+            $data['fixed'] = in_array((string) $data['fixed'], ['1','true'], true);
         }
 
+        // Handle profile photo replacement (optional)
+        if ($this->new_photo) {
+            // Store new image to public disk
+            $newPath = $this->new_photo->store('dogs', 'public'); // e.g., "dogs/abc.jpg"
+
+            // Delete old file if it exists and is on the public disk
+            if ($this->dog->photo_path && \Storage::disk('public')->exists($this->dog->photo_path)) {
+                \Storage::disk('public')->delete($this->dog->photo_path);
+            }
+
+            $data['photo_path'] = $newPath;
+        }
+
+        // Update the dog
         $this->dog->update($data);
 
         session()->flash('success', 'Dog updated!');
-        $this->redirectRoute('dogs.index');
+        $this->redirectRoute('dogs.show', $this->dog);
     }
 
     public function render()
     {
+        // Use a Livewire view under resources/views/livewire/dogs/edit.blade.php
         return view('livewire.dogs.edit');
     }
 }

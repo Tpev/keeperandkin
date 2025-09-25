@@ -4,8 +4,8 @@ namespace App\Livewire\Dogs;
 
 use App\Models\Dog;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
-use Livewire\Attributes\Validate;
 use Livewire\Component;
 use Livewire\WithFileUploads;
 
@@ -34,7 +34,7 @@ class Form extends Component
     public ?string $size = null;
     public ?string $microchip = null;
 
-    public ?string $heartworm = null; // "Heatworm" in request; using "heartworm"
+    public ?string $heartworm = null;
     public ?string $fiv_l = null;
     public ?string $flv = null;
 
@@ -49,89 +49,88 @@ class Form extends Component
     public function mount(): void
     {
         // Default to male so a non-interacted select still saves correctly
-        $this->sex = 'male';
+        $this->sex = $this->sex ?? 'male';
     }
 
     protected function rules(): array
     {
         return [
-            'serial_number'     => ['nullable','string','max:50','unique:dogs,serial_number'],
-            'name'              => ['required','string','max:255'],
-            'breed'             => ['nullable','string','max:255'],
-            'age'               => ['nullable','numeric','min:0','max:30'],
-            'sex'               => ['required','in:male,female'],
-            'description'       => ['nullable','string'],
+            'serial_number'      => ['nullable','string','max:50','unique:dogs,serial_number'],
+            'name'               => ['required','string','max:255'],
+            'breed'              => ['nullable','string','max:255'],
+            'age'                => ['nullable','numeric','min:0','max:30'],
+            'sex'                => ['required','in:male,female'],
+            'description'        => ['nullable','string'],
 
-            'location'          => ['nullable','string','max:255'],
-            // Let the model mutator handle parsing; keep validation permissive
-            'approx_dob'        => ['nullable','string','max:10'],
+            'location'           => ['nullable','string','max:255'],
+            'approx_dob'         => ['nullable','string','max:10'],
 
             // Accept '', '0', '1' from the select; cast later
-            'fixed'             => ['nullable', Rule::in(['', '0', '1', 0, 1, true, false])],
+            'fixed'              => ['nullable', Rule::in(['', '0', '1', 0, 1, true, false])],
 
-            'color'             => ['nullable','string','max:255'],
-            'size'              => ['nullable','string','max:255'],
-            'microchip'         => ['nullable','string','max:255'],
+            'color'              => ['nullable','string','max:255'],
+            'size'               => ['nullable','string','max:255'],
+            'microchip'          => ['nullable','string','max:255'],
 
-            'heartworm'         => ['nullable','string','max:255'],
-            'fiv_l'             => ['nullable','string','max:255'],
-            'flv'               => ['nullable','string','max:255'],
+            'heartworm'          => ['nullable','string','max:255'],
+            'fiv_l'              => ['nullable','string','max:255'],
+            'flv'                => ['nullable','string','max:255'],
 
-            'housetrained'      => ['nullable','string','max:255'],
-            'good_with_dogs'    => ['nullable','string','max:255'],
-            'good_with_cats'    => ['nullable','string','max:255'],
-            'good_with_children'=> ['nullable','string','max:255'],
+            'housetrained'       => ['nullable','string','max:255'],
+            'good_with_dogs'     => ['nullable','string','max:255'],
+            'good_with_cats'     => ['nullable','string','max:255'],
+            'good_with_children' => ['nullable','string','max:255'],
 
-            'photo'             => ['nullable','image','max:4096'], // 4MB
+            'photo'              => ['nullable','image','max:4096'], // 4MB
         ];
     }
 
     public function save()
     {
-        // Ensure valid inputs first
         $data = $this->validate();
 
         // Normalize 'fixed' to nullable boolean
-        // '' => null, '1'/'0' => true/false
-        $fixed = $this->fixed;
-        if ($fixed === '' || $fixed === null) {
+        if ($this->fixed === '' || $this->fixed === null) {
             $data['fixed'] = null;
         } else {
-            $data['fixed'] = in_array((string) $fixed, ['1', 'true'], true) ? true : false;
+            $data['fixed'] = in_array((string)$this->fixed, ['1','true'], true);
         }
 
-        // Photo upload
+        // Always store on public disk, under /dogs
         if ($this->photo) {
-            $data['photo'] = $this->photo->store('dogs', 'public'); // e.g., "dogs/abc.jpg"
+            $data['photo_path'] = $this->photo->store('dogs', 'public'); // e.g., "dogs/abc.jpg"
+
+            // Assert file exists on the same disk we're going to read from
+            if (!Storage::disk('public')->exists($data['photo_path'])) {
+                throw new \RuntimeException("Upload failed: {$data['photo_path']} not found on 'public' disk");
+            }
         }
 
         // Create under current team
         Auth::user()->currentTeam->dogs()->create([
-            // Existing core
-            'serial_number'      => $data['serial_number'] ?? null,
-            'name'               => $data['name'],
-            'breed'              => $data['breed'] ?? null,
-            'age'                => $data['age'] ?? null,
-            'sex'                => $data['sex'],
-            'description'        => $data['description'] ?? null,
-            'photo'              => $data['photo'] ?? null,
+            'serial_number'       => $data['serial_number'] ?? null,
+            'name'                => $data['name'],
+            'breed'               => $data['breed'] ?? null,
+            'age'                 => $data['age'] ?? null,
+            'sex'                 => $data['sex'],
+            'description'         => $data['description'] ?? null,
+            'photo_path'          => $data['photo_path'] ?? null,   // << IMPORTANT
 
-            // New fields
-            'location'           => $data['location'] ?? null,
-            'approx_dob'         => $data['approx_dob'] ?? null, // model mutator will normalize to Y-m-d
-            'fixed'              => $data['fixed'],               // normalized above
-            'color'              => $data['color'] ?? null,
-            'size'               => $data['size'] ?? null,
-            'microchip'          => $data['microchip'] ?? null,
+            'location'            => $data['location'] ?? null,
+            'approx_dob'          => $data['approx_dob'] ?? null,   // model mutator will normalize to Y-m-d
+            'fixed'               => $data['fixed'],
+            'color'               => $data['color'] ?? null,
+            'size'                => $data['size'] ?? null,
+            'microchip'           => $data['microchip'] ?? null,
 
-            'heartworm'          => $data['heartworm'] ?? null,
-            'fiv_l'              => $data['fiv_l'] ?? null,
-            'flv'                => $data['flv'] ?? null,
+            'heartworm'           => $data['heartworm'] ?? null,
+            'fiv_l'               => $data['fiv_l'] ?? null,
+            'flv'                 => $data['flv'] ?? null,
 
-            'housetrained'       => $data['housetrained'] ?? null,
-            'good_with_dogs'     => $data['good_with_dogs'] ?? null,
-            'good_with_cats'     => $data['good_with_cats'] ?? null,
-            'good_with_children' => $data['good_with_children'] ?? null,
+            'housetrained'        => $data['housetrained'] ?? null,
+            'good_with_dogs'      => $data['good_with_dogs'] ?? null,
+            'good_with_cats'      => $data['good_with_cats'] ?? null,
+            'good_with_children'  => $data['good_with_children'] ?? null,
         ]);
 
         session()->flash('success', 'Dog added!');

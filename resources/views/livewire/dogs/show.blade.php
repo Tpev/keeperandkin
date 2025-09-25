@@ -183,16 +183,18 @@
     </div>
 </section>
 
-
+@php
+    $photoUrl = $dog->photo_url ?? 'https://placehold.co/448x448?text=Dog';
+@endphp
     {{-- Header / Profile section (NOW includes the new profile fields BEFORE scorecard) --}}
     <section class="max-w-7xl mx-auto p-8 md:p-12 border"
              style="background: rgba(255,255,255,0.9); border-color: {{ $KK_DIVIDER }};">
 
         <div class="flex flex-col md:flex-row gap-10">
             {{-- Dog photo --}}
-            <img src="{{ $photo }}" alt="{{ $name }}"
-                 class="w-40 h-40 md:w-56 md:h-56 object-cover border"
-                 style="border-color: {{ $KK_BLUE_ALT }};" loading="lazy">
+<img src="{{ $photoUrl }}" alt="{{ $name }}"
+     class="w-40 h-40 md:w-56 md:h-56 object-cover border"
+     style="border-color: {{ $KK_BLUE_ALT }};" loading="lazy">
 
             <div class="flex-1 space-y-4">
                 {{-- Headline --}}
