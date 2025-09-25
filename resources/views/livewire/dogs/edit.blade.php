@@ -139,7 +139,7 @@
             ['label' => 'No',      'value' => '0'],
           ];
         @endphp
-        <x-ts-select.native label="Fixed" :options="$fixedOptions" wire:model.defer="fixed" />
+        <x-ts-select.native label="Altered" :options="$fixedOptions" wire:model.defer="fixed" />
         <x-ts-input label="Color" wire:model.defer="color" />
         <x-ts-input label="Size" wire:model.defer="size" />
         <x-ts-input label="Microchip" wire:model.defer="microchip" />

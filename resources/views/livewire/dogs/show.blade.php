@@ -277,7 +277,7 @@
 
                         {!! $row('Location', e($dog->location)) !!}
                         {!! $row('Approx. Date of Birth ', e($approxDobUs)) !!}
-                        {!! $row('Fixed', e($fixedHuman)) !!}
+                        {!! $row('Altered', e($fixedHuman)) !!}
                         {!! $row('Color', e($dog->color)) !!}
                         {!! $row('Size', e($dog->size)) !!}
                         {!! $row('Microchip', e($dog->microchip)) !!}

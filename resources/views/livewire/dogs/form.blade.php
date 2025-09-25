@@ -93,7 +93,7 @@
             ];
           @endphp
           <x-ts-select.native
-            label="Fixed"
+            label="Altered"
             :options="$fixedOptions"
             wire:model="fixed"
             :clearable="true"
