@@ -1,9 +1,25 @@
 @php
     use Illuminate\Support\Facades\Auth;
+    use Illuminate\Support\Facades\Route as R;
     use Laravel\Jetstream\Jetstream;
 
     $user = Auth::user();
-    $team = $user?->currentTeam; // may be null for invited users
+    $team = $user?->currentTeam;
+    $isAdmin = (bool) ($user?->is_admin);
+
+    // Safe route resolver (returns '#' if route is missing)
+    $safeRoute = function (string $name, array $params = []) {
+        return R::has($name) ? route($name, $params) : '#';
+    };
+
+    // Admin links (match your routes exactly)
+    $adminLinks = [
+        ['label' => 'Admin Home',        'href' => $safeRoute('admin.index')],
+        ['label' => 'Forms',             'href' => $safeRoute('admin.forms.index')],
+        ['label' => 'Training Flags',    'href' => $safeRoute('admin.training.flags')],
+        ['label' => 'Training Sessions', 'href' => $safeRoute('admin.training.sessions')],
+        ['label' => 'Eval Option Params','href' => $safeRoute('admin.eval.options')],
+    ];
 @endphp
 
 <nav x-data="{ open: false }" class="bg-white border-b border-gray-100">
@@ -20,26 +36,43 @@
 
                 <!-- Navigation Links -->
                 <div class="hidden space-x-8 sm:-my-px sm:ms-10 sm:flex">
-
                     <x-nav-link href="{{ route('dogs.index') }}" :active="request()->routeIs('dogs.index')">
                         {{ __('Dogs') }}
                     </x-nav-link>
 
-                    @auth
-                        @if(auth()->user()->is_admin)
-                            <x-nav-link href="{{ route('admin.index') }}" :active="request()->routeIs('admin.index')">
-                                Admin
-                            </x-nav-link>
-                        @endif
-                    @endauth
+                    @if ($isAdmin)
+                        {{-- Admin Dropdown (desktop) --}}
+                        <div class="ms-3 relative">
+                            <x-dropdown align="left" width="56">
+                                <x-slot name="trigger">
+                                    <button type="button"
+                                            class="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md
+                                                   text-gray-500 bg-white hover:text-gray-700 focus:outline-none focus:bg-gray-50 active:bg-gray-50
+                                                   transition ease-in-out duration-150 {{ request()->is('admin*') ? 'text-gray-900' : '' }}">
+                                        Admin
+                                        <svg class="ms-2 -me-0.5 size-4" xmlns="http://www.w3.org/2000/svg" fill="none"
+                                             viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 15L12 18.75 15.75 15m-7.5-6L12 5.25 15.75 9" />
+                                        </svg>
+                                    </button>
+                                </x-slot>
 
-                    @auth
-                        @if(auth()->user()->is_admin)
-                            <x-nav-link href="{{ route('admin.eval.options') }}" :active="request()->routeIs('admin.eval.options')">
-                                Eval Option Params
-                            </x-nav-link>
-                        @endif
-                    @endauth
+                                <x-slot name="content">
+                                    <div class="w-56">
+                                        <div class="block px-4 py-2 text-xs text-gray-400">
+                                            {{ __('Admin Tools') }}
+                                        </div>
+
+                                        @foreach($adminLinks as $link)
+                                            <x-dropdown-link href="{{ $link['href'] }}">
+                                                {{ __($link['label']) }}
+                                            </x-dropdown-link>
+                                        @endforeach
+                                    </div>
+                                </x-slot>
+                            </x-dropdown>
+                        </div>
+                    @endif
                 </div>
             </div>
 
@@ -71,7 +104,6 @@
                                     <x-dropdown-link href="{{ route('teams.show', $team->id) }}">
                                         {{ __('Team Settings') }}
                                     </x-dropdown-link>
-
 
                                     <!-- Team Switcher -->
                                     @if ($user && $user->allTeams()->count() > 1)
@@ -157,7 +189,22 @@
     <!-- Responsive Navigation Menu -->
     <div :class="{'block': open, 'hidden': ! open}" class="hidden sm:hidden">
         <div class="pt-2 pb-3 space-y-1">
+            <x-responsive-nav-link href="{{ route('dogs.index') }}" :active="request()->routeIs('dogs.index')">
+                {{ __('Dogs') }}
+            </x-responsive-nav-link>
 
+            @if ($isAdmin)
+                <div class="border-t border-gray-200 my-2"></div>
+                <div class="px-4 py-2 text-xs text-gray-400">
+                    {{ __('Admin Tools') }}
+                </div>
+
+                @foreach($adminLinks as $link)
+                    <x-responsive-nav-link href="{{ $link['href'] }}">
+                        {{ __($link['label']) }}
+                    </x-responsive-nav-link>
+                @endforeach
+            @endif
         </div>
 
         <!-- Responsive Settings Options -->
@@ -207,8 +254,6 @@
                     <x-responsive-nav-link href="{{ route('teams.show', $team->id) }}" :active="request()->routeIs('teams.show')">
                         {{ __('Team Settings') }}
                     </x-responsive-nav-link>
-
-
 
                     <!-- Team Switcher -->
                     @if ($user && $user->allTeams()->count() > 1)

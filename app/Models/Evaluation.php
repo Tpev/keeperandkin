@@ -1,28 +1,30 @@
 <?php
 
+// app/Models/Evaluation.php
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
-// app/Models/Evaluation.php
 class Evaluation extends Model
 {
-    protected $fillable = ['dog_id', 'user_id', 'score', 'answers', 'red_flags','category_scores'];
+    protected $fillable = [
+        'dog_id','user_id','form_id',
+        'answers','scores','submitted_at',
+        'score','category_scores','red_flags',
+    ];
 
-protected $casts = [
-    'answers'         => 'array',
-    'red_flags'       => 'array',
-    'category_scores' => 'array',
-];
+    protected $casts = [
+        'answers'         => 'array',
+        'scores'          => 'array',
+        'category_scores' => 'array',
+        'red_flags'       => 'array',
+        'submitted_at'    => 'datetime',
+    ];
 
-
-    public function dog()  { return $this->belongsTo(Dog::class); }
-    public function user() { return $this->belongsTo(User::class); }
-	public function form()
-{
-    return $this->belongsTo(\App\Models\EvaluationForm::class, 'evaluation_form_id');
+    public function responses(): HasMany
+    {
+        // evaluation_responses.evaluation_id → evaluations.id
+        return $this->hasMany(EvaluationResponse::class);
+    }
 }
-
-}
-
-

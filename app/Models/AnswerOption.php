@@ -20,4 +20,8 @@ class AnswerOption extends Model
     {
         return $this->belongsTo(Question::class);
     }
+	public function trainingFlags()
+{
+    return $this->belongsToMany(\App\Models\TrainingFlag::class)->withTimestamps();
+}
 }

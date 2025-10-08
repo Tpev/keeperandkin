@@ -3,117 +3,144 @@
 namespace App\Livewire\Dogs;
 
 use App\Models\Dog;
-use Illuminate\Support\Facades\Cache;
+use App\Models\DogTrainingAssignment;
+use App\Models\TrainingSession;
+use Illuminate\Support\Carbon;
 use Livewire\Component;
 
 class TrainingRoadmap extends Component
 {
     public Dog $dog;
 
-    /**
-     * Static demo plan — single, linear path.
-     * Add either `youtube` (full URL) OR `pdf` (public disk path) per step.
-     */
-    public array $plan = [];
+    /** @var \Illuminate\Support\Collection<DogTrainingAssignment> */
+    public $items;
 
-    /** Current index (0-based) into the plan */
+    /** index of the first incomplete item (computed) */
     public int $index = 0;
-
-    protected function cacheKey(): string
-    {
-        return "dog:{$this->dog->id}:training_index";
-    }
 
     public function mount(Dog $dog): void
     {
         $this->dog = $dog;
+        $this->reload();
+    }
 
-        $LABEL_CC = 'Comfort & Confidence';
-        $LABEL_SO = 'Sociability';
-        $LABEL_TR = 'Trainability';
+    private function orderByCategoryThenId()
+    {
+        // Preferred ordering: CC -> SO -> TR, then by id
+        $order = ['comfort_confidence' => 1, 'sociability' => 2, 'trainability' => 3];
 
-        // Demo plan with media
-        $this->plan = [
-            [
-                'category' => $LABEL_CC,
-                'title'    => 'Acclimation',
-                'goal'     => 'Relax in kennel with handler present (2 min)',
-                'youtube'  => 'https://youtu.be/-JgU_ozVAc0?si=kHFxwSwdquX1Fm8N',
-            ],
-            [
-                'category' => $LABEL_CC,
-                'title'    => 'Novel surfaces',
-                'goal'     => 'Cross metal grate calmly',
-                'pdf'      => 'training-modules/novel-surfaces.pdf', // public storage path (demo)
-            ],
-            [
-                'category' => $LABEL_CC,
-                'title'    => 'Startle recovery',
-                'goal'     => 'Bounce-back under 5 seconds',
-                'youtube'  => 'https://youtu.be/-JgU_ozVAc0?si=kHFxwSwdquX1Fm8N',
-            ],
-            [
-                'category' => $LABEL_SO,
-                'title'    => 'Polite greetings',
-                'goal'     => 'No jumping, sit to say hello',
-                'pdf'      => 'training-modules/polite-greetings.pdf',
-            ],
-            [
-                'category' => $LABEL_SO,
-                'title'    => 'Handler focus',
-                'goal'     => 'Hold eye contact 5 seconds',
-                'youtube'  => 'https://youtu.be/-JgU_ozVAc0?si=kHFxwSwdquX1Fm8N',
-            ],
-            [
-                'category' => $LABEL_TR,
-                'title'    => 'Place',
-                'goal'     => 'Go-to-mat from 3 meters',
-                'pdf'      => 'training-modules/place.pdf',
-            ],
-            [
-                'category' => $LABEL_TR,
-                'title'    => 'Loose leash',
-                'goal'     => 'Walk 20 m without pulling',
-                'youtube'  => 'https://youtu.be/-JgU_ozVAc0?si=kHFxwSwdquX1Fm8N',
-            ],
-            [
-                'category' => $LABEL_TR,
-                'title'    => 'Recall (foundation)',
-                'goal'     => 'Come when called (5 m)',
-                'pdf'      => 'training-modules/recall-foundation.pdf',
-            ],
-        ];
+        return function ($a, $b) use ($order) {
+            $ac = $a->session?->category ?? 'trainability';
+            $bc = $b->session?->category ?? 'trainability';
+            $aw = $order[$ac] ?? 99;
+            $bw = $order[$bc] ?? 99;
+            if ($aw === $bw) {
+                return ($a->id <=> $b->id);
+            }
+            return $aw <=> $bw;
+        };
+    }
 
-        // Restore demo progress (24h TTL)
-        $this->index = (int) Cache::get($this->cacheKey(), 0);
-        $this->index = max(0, min($this->index, count($this->plan))); // clamp
+    public function reload(): void
+    {
+        $this->items = DogTrainingAssignment::query()
+            ->where('dog_id', $this->dog->id)
+            ->with(['session']) // session has: category, name, video_url, pdf_path, goal (optional)
+            ->orderBy('id')     // no position column on this model; stable by id
+            ->get()
+            ->sort($this->orderByCategoryThenId())
+            ->values();
+
+        // first incomplete index
+        $this->index = 0;
+        foreach ($this->items as $i => $it) {
+            if ($it->status !== 'completed') {
+                $this->index = $i;
+                return;
+            }
+        }
+        // all complete → index to count (past-the-end)
+        $this->index = $this->items->count();
     }
 
     public function markComplete(): void
     {
-        if ($this->index < count($this->plan)) {
-            $this->index++;
-            Cache::put($this->cacheKey(), $this->index, now()->addDay());
-            $this->dispatch('toast', type: 'success', message: 'Module completed. Next up!');
+        if ($this->index >= $this->items->count()) {
+            return;
         }
+
+        /** @var DogTrainingAssignment|null $item */
+        $item = $this->items[$this->index] ?? null;
+        if (!$item) {
+            return;
+        }
+
+        if (!$item->started_at) {
+            $item->started_at = Carbon::now();
+        }
+        $item->status = 'completed';
+        $item->completed_at = Carbon::now();
+        $item->save();
+
+        $this->reload();
+        $this->dispatch('toast', type: 'success', message: 'Module completed. Next up!');
     }
 
     public function resetPlan(): void
     {
-        $this->index = 0;
-        Cache::put($this->cacheKey(), $this->index, now()->addDay());
+        DogTrainingAssignment::where('dog_id', $this->dog->id)->update([
+            'status'       => 'pending',
+            'started_at'   => null,
+            'completed_at' => null,
+        ]);
+        $this->reload();
         $this->dispatch('toast', type: 'success', message: 'Training plan reset.');
     }
 
     /**
+     * Generate a program for this dog if none exists.
+     * This uses ALL TrainingSession records, ordered by category then id.
+     * Replace this with your smarter builder if desired (e.g., from flags).
+     */
+    public function generateProgram(): void
+    {
+        if (DogTrainingAssignment::where('dog_id', $this->dog->id)->exists()) {
+            $this->dispatch('toast', type: 'info', message: 'Program already exists for this dog.');
+            return;
+        }
+
+        $sessions = TrainingSession::query()->get()->sort(function ($a, $b) {
+            $order = ['comfort_confidence' => 1, 'sociability' => 2, 'trainability' => 3];
+            $aw = $order[$a->category] ?? 99;
+            $bw = $order[$b->category] ?? 99;
+            if ($aw === $bw) return $a->id <=> $b->id;
+            return $aw <=> $bw;
+        });
+
+        foreach ($sessions as $s) {
+            DogTrainingAssignment::create([
+                'dog_id'              => $this->dog->id,
+                'training_session_id' => $s->id,
+                'training_flag_id'    => null,    // optional: fill if you’re tying to a specific flag
+                'evaluation_id'       => null,    // optional: fill if coming from a specific evaluation
+                'status'              => 'pending',
+                'started_at'          => null,
+                'completed_at'        => null,
+                'notes'               => null,
+            ]);
+        }
+
+        $this->reload();
+        $this->dispatch('toast', type: 'success', message: 'Program generated.');
+    }
+
+    /**
      * Convert a YouTube URL to an embeddable URL.
-     * Handles youtu.be, watch?v=, and shorts links.
      */
     public static function youtubeEmbedUrl(?string $url): ?string
     {
         if (!$url) return null;
 
-        // Extract ID from common forms
         $patterns = [
             '~youtu\.be/([A-Za-z0-9_-]{6,})~i',
             '~youtube\.com/watch\?v=([A-Za-z0-9_-]{6,})~i',
@@ -125,23 +152,29 @@ class TrainingRoadmap extends Component
                 return 'https://www.youtube.com/embed/' . $m[1] . '?rel=0&modestbranding=1';
             }
         }
-
         return null;
     }
 
     public function render()
     {
-        $total    = count($this->plan);
-        $done     = min($this->index, $total);
-        $next     = $this->index < $total ? $this->plan[$this->index] : null;
-        $upcoming = $this->index < $total ? array_slice($this->plan, $this->index + 1, 2) : [];
+        $total = $this->items->count();
+        $done  = $this->items->where('status', 'completed')->count();
 
-        // Precompute embed URL if YouTube exists
-        $embedUrl = null;
-        if ($next && !empty($next['youtube'])) {
-            $embedUrl = self::youtubeEmbedUrl($next['youtube']);
+        $nextAssignment = ($this->index < $total) ? $this->items[$this->index] : null;
+
+        // next 2 upcoming, if any
+        $upcoming = [];
+        if ($this->index < $total - 1) {
+            $slice = $this->items->slice($this->index + 1, 2);
+            $upcoming = $slice->values()->all();
         }
 
-        return view('livewire.dogs.training-roadmap', compact('total', 'done', 'next', 'upcoming', 'embedUrl'));
+        // Precompute embed URL for YouTube
+        $embedUrl = null;
+        if ($nextAssignment && $nextAssignment->session && filled($nextAssignment->session->video_url)) {
+            $embedUrl = self::youtubeEmbedUrl($nextAssignment->session->video_url);
+        }
+
+        return view('livewire.dogs.training-roadmap', compact('total', 'done', 'nextAssignment', 'upcoming', 'embedUrl'));
     }
 }

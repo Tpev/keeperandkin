@@ -16,6 +16,14 @@ use App\Livewire\Admin\FormBuilder;
 use App\Models\Dog;
 use App\Livewire\Transfers\AcceptTransfer;
 use App\Http\Controllers\TransferCancelController;
+use App\Livewire\Admin\TrainingFlagsManager;
+use App\Livewire\Admin\TrainingSessionsManager;
+
+// Admin pages (adjust middleware to your app)
+Route::middleware(['auth','verified'])->prefix('admin')->group(function () {
+    Route::get('/training/flags', TrainingFlagsManager::class)->name('admin.training.flags');
+    Route::get('/training/sessions', TrainingSessionsManager::class)->name('admin.training.sessions');
+});
 
 Route::middleware(['web'])->group(function () {
     // Accept page (guest can view but will be asked to login to proceed)

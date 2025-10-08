@@ -12,24 +12,9 @@ use App\Models\EvaluationResponseOption;
 use App\Services\Evaluation\ScoringService;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\ValidationException;
 
-/**
- * Persist responses for a given Evaluation + Form, then compute scores/flags and update the evaluation row.
- *
- * Usage:
- *   $action->handle(
- *       evaluation: $evaluation,
- *       form: $form,
- *       payload: [
- *         // per question_id:
- *         101 => ['answer_option_id' => 2001],                // single_choice / boolean
- *         102 => ['answer_option_ids' => [2002,2003]],        // multi_choice
- *         103 => ['answer_value' => 4],                       // scale (numeric)
- *         104 => ['answer_text' => 'free text'],              // text
- *       ]
- *   );
- */
 class PersistEvaluationResponses
 {
     public function __construct(
@@ -37,85 +22,132 @@ class PersistEvaluationResponses
     ) {}
 
     /**
-     * @param  Evaluation      $evaluation  Existing evaluation model (must be saved)
-     * @param  EvaluationForm  $form        The form used for this evaluation
-     * @param  array           $payload     Answers keyed by question_id (see class doc)
-     * @return void
+     * Persist a submission, then compute & store scores/flags.
      *
+     * @param  Evaluation     $evaluation  (already created)
+     * @param  EvaluationForm $form        (the form version used)
+     * @param  array          $payload     answers keyed by question_id
+     * @return void
      * @throws \Throwable
      */
     public function handle(Evaluation $evaluation, EvaluationForm $form, array $payload): void
     {
-        // Validate that the payload only includes questions present in this form
+        // Load the questions attached to this form, keyed by question_id
         $formQuestions = EvaluationFormQuestion::query()
             ->where('form_id', $form->id)
-            ->with(['question'])
+            ->with('question') // we’ll need type/category for validation & saving branches
             ->get()
             ->keyBy('question_id');
 
-        // If you want to enforce "required" here, you can do it now:
+        // Required check (visibility=always only, to match the Livewire rules)
         $missingRequired = [];
+        $byStringKey = $this->stringifyKeys($payload);
+
         foreach ($formQuestions as $qId => $fq) {
-            if ($fq->required && !array_key_exists((string)$qId, $this->stringifyKeys($payload)) && !array_key_exists($qId, $payload)) {
+            if (!($fq->required ?? false) || ($fq->visibility ?? 'always') !== 'always') {
+                continue;
+            }
+
+            // Consider it missing if no entry exists at all
+            if (!array_key_exists($qId, $payload) && !array_key_exists((string) $qId, $byStringKey)) {
                 $missingRequired[] = $qId;
             }
         }
-        if (!empty($missingRequired)) {
+
+        if ($missingRequired) {
             throw ValidationException::withMessages([
-                'responses' => ['Missing required answers for question IDs: '.implode(',', $missingRequired)]
+                'responses' => ['Missing required answers for question IDs: ' . implode(',', $missingRequired)]
             ]);
         }
 
         DB::transaction(function () use ($evaluation, $form, $payload, $formQuestions) {
-            // Clean previous responses for this evaluation (idempotent resubmit)
+            // Start clean for idempotent resubmits
             $evaluation->responses()->delete();
 
-            // Link the evaluation to the form version used for this submission
-            if ($evaluation->evaluation_form_id !== $form->id) {
-                $evaluation->evaluation_form_id = $form->id;
-                $evaluation->save();
+            // Link evaluation to the form version (if your schema supports it)
+            if (Schema::hasColumn('evaluations', 'evaluation_form_id')) {
+                if ($evaluation->evaluation_form_id !== $form->id) {
+                    $evaluation->evaluation_form_id = $form->id;
+                    $evaluation->save();
+                }
             }
 
-            // Insert responses
+            // Persist each answer
             foreach ($payload as $questionId => $answer) {
                 $questionId = (int) $questionId;
 
+                /** @var EvaluationFormQuestion|null $fq */
                 $fq = $formQuestions->get($questionId);
-                if (!$fq) {
-                    // ignore answers that are not part of this form
+                if (!$fq || !$fq->question) {
+                    // Ignore answers for questions not in this form
                     continue;
                 }
+
                 $q = $fq->question;
 
+                // MULTI-CHOICE: only save a response if there are valid option ids
+                if ($q->type === 'multi_choice') {
+                    $ids = array_values(array_unique(array_filter(array_map('intval', (array) Arr::get($answer, 'answer_option_ids', [])))));
+                    if (empty($ids)) {
+                        continue; // nothing selected -> no row at all
+                    }
+
+                    // Keep only options belonging to this question
+                    $validIds = AnswerOption::query()
+                        ->where('question_id', $questionId)
+                        ->whereIn('id', $ids)
+                        ->pluck('id')
+                        ->all();
+
+                    if (empty($validIds)) {
+                        continue;
+                    }
+
+                    $resp = new EvaluationResponse();
+                    $resp->evaluation_id = $evaluation->id;
+                    $resp->form_id       = $form->id;
+                    $resp->question_id   = $questionId;
+                    $resp->save();
+
+                    foreach ($validIds as $oid) {
+                        EvaluationResponseOption::create([
+                            'response_id'      => $resp->id,
+                            'answer_option_id' => $oid,
+                        ]);
+                    }
+
+                    continue; // done with multi-choice
+                }
+
+                // Other types: prepare a row only if there is an actual value
                 $resp = new EvaluationResponse();
-                $resp->evaluation_id   = $evaluation->id;
-                $resp->form_id         = $form->id;
-                $resp->question_id     = $questionId;
+                $resp->evaluation_id = $evaluation->id;
+                $resp->form_id       = $form->id;
+                $resp->question_id   = $questionId;
+
+                $touched = false;
 
                 switch ($q->type) {
                     case 'single_choice':
                     case 'boolean':
                         $optId = Arr::get($answer, 'answer_option_id');
                         if ($optId) {
-                            // Ensure the option belongs to this question
                             $valid = AnswerOption::query()
                                 ->where('id', $optId)
                                 ->where('question_id', $questionId)
                                 ->exists();
                             if ($valid) {
-                                $resp->answer_option_id = $optId;
+                                $resp->answer_option_id = (int) $optId;
+                                $touched = true;
                             }
                         }
-                        break;
-
-                    case 'multi_choice':
-                        // We'll save the parent response first, then child rows
                         break;
 
                     case 'scale':
                         $val = Arr::get($answer, 'answer_value');
                         if (is_numeric($val)) {
                             $resp->answer_value = (float) $val;
+                            $touched = true;
                         }
                         break;
 
@@ -123,63 +155,43 @@ class PersistEvaluationResponses
                         $txt = Arr::get($answer, 'answer_text');
                         if (is_string($txt) && $txt !== '') {
                             $resp->answer_text = $txt;
+                            $touched = true;
                         }
                         break;
 
                     default:
-                        // allow custom types to use answer_json
+                        // Custom types: store any structured value
                         $json = Arr::get($answer, 'answer_json');
-                        if ($json !== null) {
+                        if (!is_null($json)) {
                             $resp->answer_json = $json;
+                            $touched = true;
                         }
                         break;
                 }
 
-                $resp->save();
-
-                // Save multi-choice options if needed
-                if ($q->type === 'multi_choice') {
-                    $ids = Arr::get($answer, 'answer_option_ids', []);
-                    $ids = array_values(array_unique(array_filter(array_map('intval', (array) $ids))));
-                    if (!empty($ids)) {
-                        // Keep only options that belong to this question
-                        $validIds = AnswerOption::query()
-                            ->where('question_id', $questionId)
-                            ->whereIn('id', $ids)
-                            ->pluck('id')
-                            ->all();
-
-                        foreach ($validIds as $oid) {
-                            EvaluationResponseOption::create([
-                                'response_id'      => $resp->id,
-                                'answer_option_id' => $oid,
-                            ]);
-                        }
-                    }
+                if ($touched) {
+                    $resp->save();
                 }
+                // else: skip saving an empty/invalid response
             }
 
-            // Compute scores + flags and update evaluation
+            // Compute scores & flags
             $calc = $this->scoring->score($evaluation);
 
-            // Keep your existing columns as-is
-            // category_scores stored with your public labels; we’ll map keys:
-            $categoryScores = $calc['category_scores'];
-
-            // Map to your display keys exactly as your UI expects:
-            // Comfort & Confidence, Sociability, Trainability
+            // Map internal keys → public labels expected by your UI
             $displayScores = [
-                'Comfort & Confidence' => $categoryScores[ScoringService::CAT_CC] ?? null,
-                'Sociability'          => $categoryScores[ScoringService::CAT_SO] ?? null,
-                'Trainability'         => $categoryScores[ScoringService::CAT_TR] ?? null,
+                'Comfort & Confidence' => $calc['category_scores'][ScoringService::CAT_CC] ?? null,
+                'Sociability'          => $calc['category_scores'][ScoringService::CAT_SO] ?? null,
+                'Trainability'         => $calc['category_scores'][ScoringService::CAT_TR] ?? null,
             ];
 
+            // Store snapshot + metadata
             $evaluation->category_scores = $displayScores;
-            $evaluation->red_flags = array_values(array_unique($calc['red_flags'] ?? []));
-            // Do NOT touch $evaluation->score since you removed overall score from UI
+            $evaluation->red_flags       = array_values(array_unique($calc['red_flags'] ?? []));
+            $evaluation->answers         = $payload;             // snapshot for audits/tinker
+
             $evaluation->save();
 
-            // Fire event (optional)
             event(new EvaluationSubmitted($evaluation->id));
         });
     }
@@ -188,7 +200,7 @@ class PersistEvaluationResponses
     {
         $out = [];
         foreach ($arr as $k => $v) {
-            $out[(string)$k] = $v;
+            $out[(string) $k] = $v;
         }
         return $out;
     }

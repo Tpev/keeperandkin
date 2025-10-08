@@ -5,6 +5,6 @@ sudo -u www-data bash -lc "cd /var/www/keeperandkin && php artisan migrate --for
 sudo -u www-data bash -lc "cd /var/www/keeperandkin && npm ci && npm run build"
 sudo -u www-data bash -lc "cd /var/www/keeperandkin && php artisan optimize && php artisan queue:restart"
 sudo systemctl reload nginx
-
+sudo systemctl restart php8.3-fpm
 
 yJ677yOvxBP2nnK2K

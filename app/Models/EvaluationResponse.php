@@ -41,4 +41,5 @@ class EvaluationResponse extends Model
     {
         return $this->hasMany(EvaluationResponseOption::class, 'response_id');
     }
+
 }

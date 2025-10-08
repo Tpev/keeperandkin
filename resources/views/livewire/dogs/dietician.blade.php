@@ -10,7 +10,7 @@
 <section class="max-w-7xl mx-auto mt-12 border" style="background: #F7FEE7; border-color: {{ $KK_DIVIDER }};">
     {{-- Section header --}}
     <div class="px-6 py-4" style="background:#fff; border-bottom:1px solid {{ $KK_DIVIDER }}">
-        <h2 class="text-xl font-bold" style="color: {{ $KK_NAVY }}">Dietetician</h2>
+        <h2 class="text-xl font-bold" style="color: {{ $KK_NAVY }}">Dietitian </h2>
     </div>
 
     {{-- Summary chips (from profile if present) --}}

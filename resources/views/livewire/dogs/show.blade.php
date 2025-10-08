@@ -55,10 +55,14 @@
     $latestEval = $dog->latestEvaluation ?? null;
 
     // Do we truly have an evaluation?
-    $catsRaw   = is_array($latestEval?->category_scores ?? null) ? $latestEval->category_scores : [];
-    $hasScores = $latestEval && (
-        isset($catsRaw['Confidence']) || isset($catsRaw['Sociability']) || isset($catsRaw['Social']) || isset($catsRaw['Trainability'])
-    );
+$catsRaw = is_array($latestEval?->category_scores ?? null) ? $latestEval->category_scores : [];
+
+$val = function(array $a, array $keys, $default = null) {
+    foreach ($keys as $k) {
+        if (array_key_exists($k, $a) && $a[$k] !== null && $a[$k] !== '') return (int) $a[$k];
+    }
+    return $default;
+};
 
     // Color helper: OK (unknown) → Red (0–25) → Orange (26–50) → Yellow (51–75) → Green (76–100)
     $colorFor = function($v) use ($SCALE_OK,$SCALE_RED,$SCALE_ORANGE,$SCALE_YELLOW,$SCALE_GREEN) {
@@ -76,13 +80,17 @@
     $LABEL_TR = 'Trainability';
 
     // Category values mapped from stored keys
-    $categories = [
-        $LABEL_CC => $hasScores && isset($catsRaw['Confidence'])   ? (int) $catsRaw['Confidence']   : null,
-        $LABEL_SO => $hasScores && (isset($catsRaw['Sociability']) || isset($catsRaw['Social']))
-                     ? (int) ($catsRaw['Sociability'] ?? $catsRaw['Social'])
-                     : null,
-        $LABEL_TR => $hasScores && isset($catsRaw['Trainability']) ? (int) $catsRaw['Trainability'] : null,
-    ];
+$cc = $val($catsRaw, ['Comfort & Confidence','Confidence','comfort_confidence']);
+$so = $val($catsRaw, ['Sociability','Social','sociability']);
+$tr = $val($catsRaw, ['Trainability','trainability']);
+
+$hasScores = $latestEval && ($cc !== null || $so !== null || $tr !== null);
+
+$categories = [
+    $LABEL_CC => $hasScores ? $cc : null,
+    $LABEL_SO => $hasScores ? $so : null,
+    $LABEL_TR => $hasScores ? $tr : null,
+];
 
     // Helpers for rendering
     $valOrDash  = fn($v) => is_numeric($v) ? $v : '—';
@@ -346,21 +354,29 @@
         </div>
     </section>
 
-    {{-- Scorecard evolution --}}
-    @php
-        $evals = $dog->evaluations()->orderBy('created_at')->get();
-        $history = $evals->map(function ($e) {
-            $cs = (array) ($e->category_scores ?? []);
-            return [
-                'date' => $e->created_at,
-                'cc'   => (int) ($cs['Confidence'] ?? 0),
-                'so'   => (int) ($cs['Social'] ?? ($cs['Sociability'] ?? 0)),
-                'tr'   => (int) ($cs['Trainability'] ?? 0),
-            ];
-        });
-        $original = $history->first();
-        $latest   = $history->last();
-    @endphp
+{{-- Scorecard evolution --}}
+@php
+    // ADD THIS LINE:
+    $evals = $dog->evaluations()->orderBy('created_at')->get();
+
+    $history = $evals->map(function ($e) {
+        $cs = (array) ($e->category_scores ?? []);
+        $pick = function(array $a, array $keys) {
+            foreach ($keys as $k) if (array_key_exists($k, $a)) return (int) $a[$k];
+            return 0;
+        };
+        return [
+            'date' => $e->created_at,
+            'cc'   => $pick($cs, ['Comfort & Confidence','Confidence','comfort_confidence']),
+            'so'   => $pick($cs, ['Sociability','Social','sociability']),
+            'tr'   => $pick($cs, ['Trainability','trainability']),
+        ];
+    });
+
+    $original = $history->first();
+    $latest   = $history->last();
+@endphp
+
 
     <section class="max-w-7xl mx-auto mt-12 border p-8 md:p-10" style="background: {{ $KK_BLUE_ALT }}; border-color: {{ $KK_DIVIDER }};">
         <h2 class="text-xl font-bold mb-6">Scorecard Evolution</h2>
@@ -458,6 +474,8 @@
 
 
 {{-- Training Program (Livewire) --}}
+
+
 <livewire:dogs.training-roadmap :dog="$dog" />
 
 

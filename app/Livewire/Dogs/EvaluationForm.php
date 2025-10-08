@@ -445,13 +445,14 @@ class EvaluationForm extends Component
             /** @var DbEvaluationForm $form */
             $formId = (int) ($this->dbFormDto['form']['id'] ?? 0);
             $form   = DbEvaluationForm::findOrFail($formId);
-
+			$initialAnswers = $this->answers ?? [];
             // Create a bare evaluation row (same way as legacy does)
-            $evaluation = Evaluation::create([
-                'dog_id'  => $this->dog->id,
-                'user_id' => Auth::id(),
-                // keep other columns nullable; Phase 2 action will fill category_scores & red_flags
-            ]);
+			$evaluation = Evaluation::create([
+				'dog_id'       => $this->dog->id,
+				'user_id'      => Auth::id(),
+				'answers'      => $initialAnswers,  // <-- THIS avoids the 1364 error
+
+			]);
 
             // $payload is already in the expected action shape: answers keyed by question_id
             $payload = $this->answers;
