@@ -8,6 +8,19 @@
         <div class="p-2 bg-green-50 text-green-700 rounded">{{ session('success') }}</div>
     @endif
 
+    {{-- FILTERS --}}
+    <div class="bg-white border rounded p-4 flex items-end gap-3">
+        <div>
+            <label class="text-sm block mb-1">Filter by audience</label>
+            <select class="border rounded px-2 py-1" wire:model.live="filterAudience">
+                <option value="all">All</option>
+                <option value="dog">Dog</option>
+                <option value="people">People</option>
+            </select>
+        </div>
+    </div>
+
+    {{-- CREATE / EDIT FORM --}}
     <div class="bg-white border rounded p-4 space-y-3">
         <h2 class="font-semibold">{{ $editId ? 'Edit Flag' : 'New Flag' }}</h2>
         <div class="grid grid-cols-2 gap-3">
@@ -16,11 +29,21 @@
                 <input type="text" wire:model.defer="name" class="border rounded w-full px-2 py-1">
                 @error('name') <p class="text-red-600 text-sm">{{ $message }}</p> @enderror
             </div>
-            <div class="flex items-end">
+
+            <div class="flex items-end gap-4">
+                <div class="flex-1">
+                    <label class="text-sm block">Audience</label>
+                    <select wire:model.defer="audience" class="border rounded w-full px-2 py-1">
+                        <option value="dog">Dog</option>
+                        <option value="people">People</option>
+                    </select>
+                    @error('audience') <p class="text-red-600 text-sm">{{ $message }}</p> @enderror
+                </div>
                 <label class="inline-flex items-center gap-2">
                     <input type="checkbox" wire:model="is_active"> Active
                 </label>
             </div>
+
             <div class="col-span-2">
                 <label class="text-sm">Description</label>
                 <textarea wire:model.defer="description" rows="2" class="border rounded w-full px-2 py-1"></textarea>
@@ -32,6 +55,7 @@
         </div>
     </div>
 
+    {{-- LIST --}}
     <div class="bg-white border rounded p-4">
         <h2 class="font-semibold mb-3">All Flags</h2>
         <div class="grid md:grid-cols-2 gap-4">
@@ -39,8 +63,20 @@
                 <div class="border rounded p-3">
                     <div class="flex items-center justify-between">
                         <div>
-                            <div class="font-semibold">{{ $f->name }}</div>
-                            <div class="text-xs text-gray-500">slug: {{ $f->slug }} · Sessions: {{ $f->sessions_count }} · Options: {{ $f->answer_options_count }}</div>
+                            <div class="font-semibold flex items-center gap-2">
+                                {{ $f->name }}
+                                <span class="text-xs px-2 py-0.5 rounded-full border">
+                                    {{ $f->audience === 'people' ? 'People' : 'Dog' }}
+                                </span>
+                                @if(!$f->is_active)
+                                    <span class="text-xs px-2 py-0.5 rounded-full bg-gray-100">Inactive</span>
+                                @endif
+                            </div>
+                            <div class="text-xs text-gray-500">
+                                slug: {{ $f->slug }}
+                                · Sessions: {{ $f->sessions_count }}
+                                · Options: {{ $f->answer_options_count }}
+                            </div>
                         </div>
                         <div class="flex gap-2">
                             <button class="px-2 py-1 border rounded" wire:click="edit({{ $f->id }})">Edit</button>

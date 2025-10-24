@@ -1,3 +1,4 @@
+{{-- resources/views/livewire/dogs/table.blade.php --}}
 <div>
     @push('styles')
     <style>
@@ -6,9 +7,13 @@
         --kk-blue:#076BA8;
         --kk-blue-alt:#DAEEFF;
         --kk-divider:#E2E8F0;
-        --kk-danger:#DC2626;
-        --kk-amber:#F59E0B;
-        --kk-slate:#64748B;
+
+        /* Your exact score scale */
+        --kk-scale-ok:#94A3B8;     /* slate-400 (unknown/missing) */
+        --kk-scale-red:#DC2626;    /* 0–25 */
+        --kk-scale-orange:#F97316; /* 26–50 */
+        --kk-scale-yellow:#FFCC00; /* 51–75 */
+        --kk-scale-green:#16A34A;  /* 76–100 */
       }
 
       /* Hard corners everywhere inside kk-table */
@@ -43,14 +48,25 @@
       .kk-score{
         display:inline-flex; align-items:center; justify-content:center;
         font-size:.8rem; font-weight:700; padding:.25rem .5rem;
-        border:1px solid var(--kk-divider); background: #fff; color: var(--kk-slate);
+        border:1px solid var(--kk-divider); background:#fff; color: var(--kk-scale-ok);
         min-width: 2.25rem; text-align:center;
       }
+
+      /* Your 4 buckets (border + text use the bucket color, white background) */
+      .kk-score--red    { color: var(--kk-scale-red);    border-color: var(--kk-scale-red); }
+      .kk-score--orange { color: var(--kk-scale-orange); border-color: var(--kk-scale-orange); }
+      .kk-score--yellow { color: var(--kk-scale-yellow); border-color: var(--kk-scale-yellow); }
+      .kk-score--green  { color: var(--kk-scale-green);  border-color: var(--kk-scale-green); }
+
+      /* Layout the three chips nicely inside the cell */
+      .kk-scores-3 { display:flex; align-items:center; gap:.35rem; }
+      .kk-scores-3 .kk-score { min-width:2.25rem; }
+      .kk-score-label { font-size:.675rem; font-weight:800; letter-spacing:.2px; margin-right:.15rem; color:var(--kk-scale-ok); }
 
       /* Flag chip */
       .kk-flag{
         display:inline-flex; align-items:center; font-size:.75rem; font-weight:700;
-        padding:.25rem .5rem; border:1px solid var(--kk-danger); background: #fff; color: var(--kk-danger);
+        padding:.25rem .5rem; border:1px solid var(--kk-scale-red); background: #fff; color: var(--kk-scale-red);
       }
       .kk-flag-none{ border-color: var(--kk-divider); color:#374151; }
 
@@ -58,9 +74,9 @@
       .kk-btn {
         display:inline-flex; align-items:center; gap:.35rem;
         padding:.4rem .6rem; font-size:.8125rem; font-weight:700;
-        border:1px solid var(--kk-divider); background:#fff; color:var(--kk-blue);
+        border:1px solid var(--kk-divider); background:#fff; color:#076BA8;
       }
-      .kk-btn--primary { background: var(--kk-blue); color:#fff; border-color: var(--kk-blue); }
+      .kk-btn--primary { background: #076BA8; color:#fff; border-color: #076BA8; }
       .kk-btn svg { width: 14px; height: 14px; }
 
       /* Pagination footer */
@@ -70,7 +86,7 @@
 
     <div class="kk-table">
 
-        {{-- Toolbar: search + filters (brand-aligned, hard corners) --}}
+        {{-- Toolbar: search + filters --}}
         <div class="kk-toolbar p-3 mb-3">
             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
                 <div class="lg:col-span-2">
@@ -151,26 +167,66 @@
                 {{ isset($row->sex) ? \Illuminate\Support\Str::ucfirst($row->sex) : '—' }}
             @endinteract
 
-            {{-- SCORE (latest evaluation) --}}
+            {{-- SCORES (C/S/T with your 4-range colors) --}}
             @interact('column_score', $row)
                 @php
-                    $score = $row->latestEvaluation->score ?? null;
-                    $scoreInt = is_numeric($score) ? (int)$score : null;
+                    $ev = $row->latestEvaluation ?? ($row['latestEvaluation'] ?? null);
 
-                    $color = $scoreInt === null
-                        ? 'var(--kk-slate)'
-                        : ($scoreInt < 50 ? 'var(--kk-danger)' : ($scoreInt < 75 ? 'var(--kk-amber)' : 'var(--kk-blue)'));
+                    $toArray = function ($maybe) {
+                        if (is_array($maybe)) return $maybe;
+                        if (is_object($maybe)) return get_object_vars($maybe);
+                        return [];
+                    };
+
+                    $raw   = $ev->category_scores ?? ($ev['category_scores'] ?? null);
+                    $byCat = $toArray($raw);
+
+                    $pick = function(array $a, array $keys, $fallback = null) {
+                        foreach ($keys as $k) {
+                            if (array_key_exists($k, $a) && $a[$k] !== null && $a[$k] !== '') {
+                                return (int) $a[$k];
+                            }
+                        }
+                        return $fallback;
+                    };
+
+                    $c = $pick($byCat, ['Comfort & Confidence','Confidence','comfort_confidence'], null);
+                    $s = $pick($byCat, ['Sociability','Social','sociability'], null);
+                    $t = $pick($byCat, ['Trainability','trainability'], null);
+
+                    $norm = function ($v) { if (!is_numeric($v)) return null; $v=(int)$v; return max(0,min(100,$v)); };
+                    $c = $norm($c); $s = $norm($s); $t = $norm($t);
+
+                    // EXACT bucket edges:
+                    // 0–25 => red, 26–50 => orange, 51–75 => yellow, 76–100 => green
+                    $classFor = function ($v) {
+                        if ($v === null) return '';            // unknown/missing -> base ok/slate style
+                        if ($v <= 25)  return 'kk-score--red';
+                        if ($v <= 50)  return 'kk-score--orange';
+                        if ($v <= 75)  return 'kk-score--yellow';
+                        return 'kk-score--green';
+                    };
                 @endphp
 
-                <span class="kk-score" style="color: {{ $color }};">
-                    {{ $scoreInt ?? '—' }}
-                </span>
+                <div class="kk-scores-3" title="Comfort / Sociability / Trainability">
+                    <span class="kk-score-label">C</span>
+                    <span class="kk-score {{ $classFor($c) }}" title="Comfort & Confidence">{{ $c === null ? '—' : $c }}</span>
+
+                    <span class="kk-score-label">S</span>
+                    <span class="kk-score {{ $classFor($s) }}" title="Sociability">{{ $s === null ? '—' : $s }}</span>
+
+                    <span class="kk-score-label">T</span>
+                    <span class="kk-score {{ $classFor($t) }}" title="Trainability">{{ $t === null ? '—' : $t }}</span>
+                </div>
             @endinteract
 
             {{-- FLAG (latest evaluation red_flags) --}}
             @interact('column_flag', $row)
                 @php
-                    $flags = (array)($row->latestEvaluation->red_flags ?? []);
+                    $ev    = $row->latestEvaluation ?? null;
+                    $flags = $ev?->red_flags ?? [];
+                    if (is_object($flags)) $flags = get_object_vars($flags);
+                    if (!is_array($flags)) $flags = [];
                     $count = count($flags);
                 @endphp
 
@@ -187,7 +243,7 @@
                 @endif
             @endinteract
 
-            {{-- ACTIONS (hard corners, brand colors) --}}
+            {{-- ACTIONS --}}
             @interact('column_action', $row)
                 <div class="flex items-center gap-2">
                     <a class="kk-btn" href="{{ route('dogs.show', $row) }}" title="View">

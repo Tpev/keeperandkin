@@ -1,4 +1,24 @@
-<form wire:submit.prevent="submit" class="space-y-10">
+<form wire:submit.prevent="submit" class="space-y-10"
+      x-data="{ s: @entangle('step') }"
+      x-init="
+        $watch('s', () => {
+          // Smooth scroll the window to the very top
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+
+          // Also try scrolling common app containers if present (optional safety nets)
+          const main = document.querySelector('main');
+          if (main) main.scrollTo({ top: 0, behavior: 'smooth' });
+          const app = document.getElementById('app');
+          if (app) app.scrollTo({ top: 0, behavior: 'smooth' });
+
+          // Focus the step heading without causing another jump
+          requestAnimationFrame(() => {
+            const h = document.getElementById('step-heading');
+            if (h) h.focus({ preventScroll: true });
+          });
+        });
+      "
+>
   @php
     $circ = 2 * M_PI * 44; // r=44
     $offset = $circ - ($this->progressPercent / 100) * $circ;
@@ -8,7 +28,7 @@
   <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-6">
     <div class="flex items-center gap-5">
       <div class="relative">
-        <svg class="w-24 h-24">
+        <svg class="w-24 h-24" aria-hidden="true">
           <circle cx="48" cy="48" r="44" fill="none" stroke="#E2E8F0" stroke-width="8"/>
           <circle cx="48" cy="48" r="44" fill="none"
                   stroke="{{ $ring }}" stroke-width="8"
@@ -72,7 +92,7 @@
 
   {{-- ===== Current step/category only ===== --}}
   <section class="kk-sec p-5 sm:p-6" wire:key="section-{{ $this->currentCategoryKey }}-{{ $this->step }}">
-    <h3 class="text-lg mb-4">
+    <h3 id="step-heading" class="text-lg mb-4" tabindex="-1">
       Step {{ $this->step }} of {{ $this->stepsCount }} — {{ $this->currentCategoryKey }}
     </h3>
 

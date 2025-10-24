@@ -18,7 +18,7 @@
         ['label' => 'Forms',             'href' => $safeRoute('admin.forms.index')],
         ['label' => 'Training Flags',    'href' => $safeRoute('admin.training.flags')],
         ['label' => 'Training Sessions', 'href' => $safeRoute('admin.training.sessions')],
-        ['label' => 'Eval Option Params','href' => $safeRoute('admin.eval.options')],
+        ['label' => 'Certification','href' => $safeRoute('admin.cert.programs')],
     ];
 @endphp
 
@@ -38,6 +38,9 @@
                 <div class="hidden space-x-8 sm:-my-px sm:ms-10 sm:flex">
                     <x-nav-link href="{{ route('dogs.index') }}" :active="request()->routeIs('dogs.index')">
                         {{ __('Dogs') }}
+                    </x-nav-link>                    
+					<x-nav-link href="{{ route('learn.index') }}" :active="request()->routeIs('learn.index')">
+                        {{ __('Learn') }}
                     </x-nav-link>
 
                     @if ($isAdmin)

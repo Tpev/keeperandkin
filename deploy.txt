@@ -8,3 +8,6 @@ sudo systemctl reload nginx
 sudo systemctl restart php8.3-fpm
 
 yJ677yOvxBP2nnK2K
+
+
+php artisan db:seed --class=EvaluationFormV1Seeder

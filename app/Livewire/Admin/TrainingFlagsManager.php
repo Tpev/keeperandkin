@@ -7,6 +7,7 @@ use App\Models\TrainingFlag;
 use App\Models\TrainingSession;
 use App\Models\AnswerOption;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 
 class TrainingFlagsManager extends Component
 {
@@ -14,6 +15,7 @@ class TrainingFlagsManager extends Component
     public string $name = '';
     public string $description = '';
     public bool $is_active = true;
+    public string $audience = 'dog'; // NEW: default dog
     public ?int $editId = null;
 
     // Attach sessions & options
@@ -21,14 +23,17 @@ class TrainingFlagsManager extends Component
     public ?int $sessionToAttach = null;
     public ?int $optionToAttach = null;
 
+    // Filters & search
+    public string $filterAudience = 'all'; // NEW: all|dog|people
     public string $searchOptions = '';
 
     public function save(): void
     {
         $this->validate([
-            'name' => ['required','string','max:255'],
+            'name'        => ['required','string','max:255'],
             'description' => ['nullable','string'],
-            'is_active' => ['boolean'],
+            'is_active'   => ['boolean'],
+            'audience'    => ['required', Rule::in(TrainingFlag::AUDIENCE_VALUES)], // NEW
         ]);
 
         if ($this->editId) {
@@ -36,18 +41,21 @@ class TrainingFlagsManager extends Component
             $flag->name = $this->name;
             $flag->description = $this->description ?: null;
             $flag->is_active = $this->is_active;
+            $flag->audience = $this->audience; // NEW
             if (!$flag->slug) $flag->slug = Str::slug($flag->name);
             $flag->save();
         } else {
             TrainingFlag::create([
-                'name' => $this->name,
-                'slug' => Str::slug($this->name),
+                'name'        => $this->name,
+                'slug'        => Str::slug($this->name),
                 'description' => $this->description ?: null,
-                'is_active' => $this->is_active,
+                'is_active'   => $this->is_active,
+                'audience'    => $this->audience, // NEW
             ]);
         }
 
-        $this->reset(['name','description','is_active','editId']);
+        $this->reset(['name','description','is_active','audience','editId']);
+        $this->audience = 'dog'; // preserve default after reset
         session()->flash('success','Flag saved.');
     }
 
@@ -59,6 +67,7 @@ class TrainingFlagsManager extends Component
         $this->name = $f->name;
         $this->description = $f->description ?? '';
         $this->is_active = (bool) $f->is_active;
+        $this->audience = $f->audience ?: 'dog'; // NEW
     }
 
     public function delete(int $id): void
@@ -77,12 +86,16 @@ class TrainingFlagsManager extends Component
         $currentMax = $flag->sessions()->max('training_flag_training_session.position') ?? 0;
         $flag->sessions()->syncWithoutDetaching([$sess->id => ['position' => $currentMax + 1]]);
         $this->sessionToAttach = null;
+
+        // Refresh selected flag to reflect change
+        $this->edit($flag->id);
     }
 
     public function detachSession(int $sessionId): void
     {
         if (!$this->flagId) return;
         TrainingFlag::findOrFail($this->flagId)->sessions()->detach($sessionId);
+        $this->edit($this->flagId);
     }
 
     public function moveSession(int $sessionId, string $dir): void
@@ -105,6 +118,8 @@ class TrainingFlagsManager extends Component
         foreach ($arr as $r) {
             $flag->sessions()->updateExistingPivot($r['id'], ['position'=>$r['pos']]);
         }
+
+        $this->edit($flag->id);
     }
 
     public function attachOption(): void
@@ -113,18 +128,23 @@ class TrainingFlagsManager extends Component
         $flag = TrainingFlag::findOrFail($this->flagId);
         $flag->answerOptions()->syncWithoutDetaching([$this->optionToAttach]);
         $this->optionToAttach = null;
+
+        $this->edit($flag->id);
     }
 
     public function detachOption(int $optionId): void
     {
         if (!$this->flagId) return;
         TrainingFlag::findOrFail($this->flagId)->answerOptions()->detach($optionId);
+        $this->edit($this->flagId);
     }
 
     public function render()
     {
         $flags = TrainingFlag::withCount(['sessions','answerOptions'])
-            ->orderBy('name')->get();
+            ->when($this->filterAudience !== 'all', fn($q) => $q->where('audience', $this->filterAudience)) // NEW
+            ->orderBy('name')
+            ->get();
 
         $sessions = TrainingSession::orderBy('name')->get();
 

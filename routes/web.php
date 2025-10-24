@@ -19,6 +19,24 @@ use App\Http\Controllers\TransferCancelController;
 use App\Livewire\Admin\TrainingFlagsManager;
 use App\Livewire\Admin\TrainingSessionsManager;
 
+
+use App\Livewire\Admin\CertificationProgramsManager;
+use App\Livewire\Learn\ProgramsIndex;
+use App\Livewire\Learn\ProgramShow;
+
+Route::middleware(['auth'])->group(function () {
+    Route::get('/learn', ProgramsIndex::class)->name('learn.index');
+    Route::get('/learn/{slug}', ProgramShow::class)->name('learn.show');
+});
+
+Route::middleware(['auth']) // or your admin gate
+    ->prefix('admin')
+    ->name('admin.')
+    ->group(function () {
+        Route::get('/cert-programs', CertificationProgramsManager::class)
+            ->name('cert.programs');
+    });
+
 // Admin pages (adjust middleware to your app)
 Route::middleware(['auth','verified'])->prefix('admin')->group(function () {
     Route::get('/training/flags', TrainingFlagsManager::class)->name('admin.training.flags');
