@@ -6,11 +6,13 @@ use Livewire\Component;
 use App\Models\EvaluationForm;
 use App\Models\EvaluationSection;
 use App\Models\EvaluationFormQuestion;
+use App\Models\EvaluationFollowUp;
 use App\Models\Question;
 use App\Models\AnswerOption;
 use App\Models\TrainingFlag;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 
 class FormBuilder extends Component
 {
@@ -46,11 +48,10 @@ class FormBuilder extends Component
      *   [
      *     'label' => '',
      *     'value' => '',
-     *     'flags' => [...],                     // red flags (legacy badges)
-     *     'training_flag_ids' => [1,2,...],     // NEW: db training flags
+     *     'flags' => [...],
+     *     'training_flag_ids' => [1,2,...],
      *     'scores' => ['comfort_confidence'=>0,'sociability'=>0,'trainability'=>0]
      *   ],
-     *   ...
      * ]
      */
     public array $optionRows = [];
@@ -73,6 +74,21 @@ class FormBuilder extends Component
     public string $derivedCategoryKey = 'general'; // comfort_confidence|sociability|trainability|general
     public string $derivedCategoryLabel = 'General';
 
+    /* =============================
+     * FOLLOW-UP EDITOR STATE (Admin)
+     * ============================= */
+    public bool $followUpModal = false;
+    public ?int $fuChildFqId = null;
+    public ?int $fuParentFqId = null;
+    /** @var array<int> */
+    public array $fuTriggerOptionIds = [];
+    public string $fuRequiredMode = 'visible_only';
+    public string $fuDisplayMode  = 'inline_after_parent';
+
+    /** Dropdown data sources */
+    public array $fuParentCandidates = []; // [ ['id'=>int,'label'=>string], ... ]
+    public array $fuParentOptions    = []; // [ ['id'=>int,'label'=>string], ... ]
+
     public function mount(EvaluationForm $form): void
     {
         $this->form = $form->load([
@@ -80,6 +96,7 @@ class FormBuilder extends Component
             'formQuestions' => fn ($q) => $q->orderBy('position')->with([
                 'question',
                 'section',
+                'followUpRule', // <-- needed by Blade
                 'question.answerOptions' => fn ($r) => $r->orderBy('position')->with('trainingFlags'),
             ]),
         ]);
@@ -160,7 +177,7 @@ class FormBuilder extends Component
         $sec->save();
 
         $this->editingSectionId = null;
-               $this->editingSectionTitle = '';
+        $this->editingSectionTitle = '';
         $this->reload();
     }
 
@@ -169,6 +186,7 @@ class FormBuilder extends Component
         $sec = $this->form->sections->firstWhere('id', $sectionId);
         if (!$sec) return;
 
+        // Deleting FQs will cascade delete any follow-up rules via FK (if you used our migration)
         EvaluationFormQuestion::where('form_id', $this->form->id)
             ->where('section_id', $sec->id)->delete();
 
@@ -462,6 +480,7 @@ class FormBuilder extends Component
 
     public function detachQuestion(int $fqId): void
     {
+        // Deleting the child will cascade-delete follow-up rule (child side) by FK
         EvaluationFormQuestion::where('id', $fqId)->delete();
         $this->reload();
     }
@@ -512,7 +531,6 @@ class FormBuilder extends Component
         $ids = array_values(array_unique(array_map('intval', $flagIds)));
         $valid = TrainingFlag::whereIn('id', $ids)->pluck('id')->all();
         $opt->trainingFlags()->sync($valid);
-        // no heavy reload; but ensure relation is fresh for UI that re-renders
         $this->reload();
     }
 
@@ -537,6 +555,219 @@ class FormBuilder extends Component
         $this->reload();
     }
 
+    /* =============================
+     * FOLLOW-UP RULES (Admin)
+     * ============================= */
+
+    /** Open modal to configure follow-up for a CHILD question (this row). Uses GLOBAL ordering across sections. */
+    public function openFollowUpModal(int $childFormQuestionId): void
+    {
+        $child = EvaluationFormQuestion::with(['followUpRule', 'question', 'section'])->findOrFail($childFormQuestionId);
+        $this->authorizeSameForm($child->form_id);
+
+        // Compute child's global order key once
+        $childKey = $this->globalOrderKey($child);
+
+        // Build candidates with SQL joins so we never depend on unloaded relations
+        $candidates = EvaluationFormQuestion::query()
+            ->select('evaluation_form_questions.*', 'evaluation_sections.position as sec_pos')
+            ->join('evaluation_sections', 'evaluation_sections.id', '=', 'evaluation_form_questions.section_id')
+            ->join('questions', 'questions.id', '=', 'evaluation_form_questions.question_id')
+            ->where('evaluation_form_questions.form_id', $child->form_id)
+            ->where('evaluation_form_questions.id', '!=', $child->id)
+            ->whereIn('questions.type', ['single_choice','multi_choice','boolean'])
+            // global order: section.position * 100000 + fq.position
+            ->whereRaw('(evaluation_sections.position * 100000 + evaluation_form_questions.position) < ?', [$childKey])
+            ->orderBy('evaluation_sections.position')
+            ->orderBy('evaluation_form_questions.position')
+            ->with(['question','section'])
+            ->get();
+
+        $this->fuParentCandidates = $candidates->map(function ($fq) {
+            return [
+                'id'    => $fq->id,
+                'label' => sprintf(
+                    'Sec %d • #%d — %s (%s)',
+                    (int)($fq->section?->position ?? 0),
+                    (int)$fq->position,
+                    Str::limit($fq->question->prompt ?? '—', 80),
+                    $fq->question->slug ?? '—'
+                ),
+            ];
+        })->values()->all();
+
+        $this->fuChildFqId        = $child->id;
+        $this->fuParentFqId       = $child->followUpRule?->parent_form_question_id;
+        $this->fuTriggerOptionIds = $child->followUpRule?->trigger_option_ids ?? [];
+        $this->fuRequiredMode     = $child->followUpRule->required_mode ?? 'visible_only';
+        $this->fuDisplayMode      = $child->followUpRule->display_mode ?? 'inline_after_parent';
+
+        $this->fuParentOptions = [];
+        if ($this->fuParentFqId) {
+            $this->fuParentOptions = $this->loadParentOptions($this->fuParentFqId);
+        }
+
+        $this->followUpModal = true;
+    }
+
+    public function updatedFuParentFqId($value): void
+    {
+        $this->fuTriggerOptionIds = [];
+        $this->fuParentOptions = $value ? $this->loadParentOptions((int)$value) : [];
+    }
+
+    protected function loadParentOptions(int $parentFqId): array
+    {
+        $parent = EvaluationFormQuestion::with(['question.answerOptions'])->findOrFail($parentFqId);
+        $q = $parent->question;
+        if (!$q) return [];
+
+        // Boolean: if the model doesn't store options, offer pseudo options
+        if ($q->type === 'boolean' && ($q->answerOptions?->count() ?? 0) === 0) {
+            return [
+                ['id' => -1, 'label' => 'Yes'],
+                ['id' => -2, 'label' => 'No'],
+            ];
+        }
+
+        return $q->answerOptions->map(fn($o) => ['id' => (int)$o->id, 'label' => $o->label])->values()->all();
+    }
+
+    public function saveFollowUp(): void
+    {
+        $this->validate([
+            'fuChildFqId'        => ['required','integer','exists:evaluation_form_questions,id'],
+            'fuParentFqId'       => ['required','integer','exists:evaluation_form_questions,id','different:fuChildFqId'],
+            'fuTriggerOptionIds' => ['array'],
+            'fuRequiredMode'     => [Rule::in(['visible_only','always'])],
+            'fuDisplayMode'      => [Rule::in(['inline_after_parent'])],
+        ]);
+
+        $child  = EvaluationFormQuestion::with('section')->findOrFail($this->fuChildFqId);
+        $parent = EvaluationFormQuestion::with('section')->findOrFail($this->fuParentFqId);
+
+        if ($child->form_id !== $parent->form_id) {
+            $this->addError('fuParentFqId', 'Parent must be from the same form.');
+            return;
+        }
+
+        // GLOBAL order comparison (section.position, then question.position)
+        if ($this->globalOrderKey($parent) >= $this->globalOrderKey($child)) {
+            $this->addError('fuParentFqId', 'Parent must appear before the follow-up.');
+            return;
+        }
+
+        DB::transaction(function () use ($child, $parent) {
+            EvaluationFollowUp::updateOrCreate(
+                ['child_form_question_id' => $child->id],
+                [
+                    'parent_form_question_id' => $parent->id,
+                    'trigger_option_ids'      => array_values(array_map('intval', $this->fuTriggerOptionIds ?? [])),
+                    'required_mode'           => $this->fuRequiredMode,
+                    'display_mode'            => $this->fuDisplayMode,
+                ]
+            );
+        });
+
+        $this->followUpModal = false;
+        session()->flash('success', 'Follow-up rule saved.');
+        $this->refreshForm();
+    }
+
+    public function removeFollowUp(int $childFormQuestionId): void
+    {
+        EvaluationFollowUp::where('child_form_question_id', $childFormQuestionId)->delete();
+        session()->flash('success', 'Follow-up rule removed.');
+        $this->refreshForm();
+    }
+
+    /** Place the child question row immediately after its parent (positions) */
+    public function snapChildAfterParent(int $childFormQuestionId): void
+    {
+        $child = EvaluationFormQuestion::with(['followUpRule', 'section'])->findOrFail($childFormQuestionId);
+        $rule  = $child->followUpRule;
+        if (!$rule) {
+            session()->flash('error', 'No follow-up rule on this question.');
+            return;
+        }
+        $parent = EvaluationFormQuestion::with('section')->findOrFail($rule->parent_form_question_id);
+        if ($parent->form_id !== $child->form_id) {
+            session()->flash('error', 'Parent is not in the same form.');
+            return;
+        }
+
+        DB::transaction(function () use ($child, $parent) {
+            // If child is in a different section, move it to the parent's section first
+            if ($child->section_id !== $parent->section_id) {
+                // Close the gap in the old section
+                EvaluationFormQuestion::where('form_id', $child->form_id)
+                    ->where('section_id', $child->section_id)
+                    ->where('position', '>', $child->position)
+                    ->decrement('position');
+
+                // Make space in the target (parent) section after the parent
+                EvaluationFormQuestion::where('form_id', $child->form_id)
+                    ->where('section_id', $parent->section_id)
+                    ->where('position', '>', $parent->position)
+                    ->increment('position');
+
+                $child->section_id = $parent->section_id;
+                $child->position   = $parent->position + 1;
+                $child->save();
+            } else {
+                // Same section: shift everything after parent down by one, then place child
+                EvaluationFormQuestion::where('form_id', $child->form_id)
+                    ->where('section_id', $child->section_id)
+                    ->where('position', '>', $parent->position)
+                    ->increment('position');
+
+                $child->position = $parent->position + 1;
+                $child->save();
+
+                // Repack to 1..N to avoid duplicates after moves
+                EvaluationFormQuestion::where('form_id', $child->form_id)
+                    ->where('section_id', $child->section_id)
+                    ->where('id', '!=', $child->id)
+                    ->orderBy('position')
+                    ->get()
+                    ->values()
+                    ->each(function ($fq, $idx) {
+                        $desired = $idx + 1;
+                        if ((int)$fq->position !== $desired) {
+                            $fq->position = $desired;
+                            $fq->save();
+                        }
+                    });
+            }
+        });
+
+        session()->flash('success', 'Child snapped after parent.');
+        $this->refreshForm();
+    }
+
+    /** Called by Blade when the Parent select changes to refresh trigger options immediately */
+    public function onFuParentChanged($parentFqId): void
+    {
+        $this->fuParentFqId = ($parentFqId !== null && $parentFqId !== '')
+            ? (int) $parentFqId
+            : null;
+
+        // Reset triggers when parent changes
+        $this->fuTriggerOptionIds = [];
+
+        // Rebuild options from the actual parent
+        $this->fuParentOptions = $this->fuParentFqId
+            ? $this->loadParentOptions($this->fuParentFqId)
+            : [];
+    }
+
+    protected function authorizeSameForm(int $formId): void
+    {
+        if ($this->form->id !== $formId) {
+            abort(403);
+        }
+    }
+
     /* ---------- helpers ---------- */
 
     private function reload(): void
@@ -546,12 +777,19 @@ class FormBuilder extends Component
             'formQuestions' => fn ($q) => $q->orderBy('position')->with([
                 'question',
                 'section',
+                'followUpRule',
                 'question.answerOptions' => fn ($r) => $r->orderBy('position')->with('trainingFlags'),
             ]),
         ]);
 
         // Keep training flag list fresh in case admin added/renamed in another tab
         $this->trainingFlags = TrainingFlag::orderBy('name')->get();
+    }
+
+    /** Convenience to reload + keep any modal state safe */
+    private function refreshForm(): void
+    {
+        $this->reload();
     }
 
     private function uniqueSlug(string $table, string $column, string $base): string
@@ -613,6 +851,13 @@ class FormBuilder extends Component
             'trainability'       => $cat==='trainability'       ? $val : 0,
         ];
         $opt->save();
+    }
+
+    /** Combine section.position and FQ.position into a comparable key for global ordering */
+    private function globalOrderKey(EvaluationFormQuestion $fq): int
+    {
+        $secPos = (int)($fq->section->position ?? 0);
+        return $secPos * 100000 + (int)$fq->position;
     }
 
     public function render()

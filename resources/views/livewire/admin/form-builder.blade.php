@@ -189,6 +189,20 @@
                                                     invert: {{ ($q->meta['invert'] ?? false) ? 'Yes' : 'No' }}
                                                 </div>
                                             @endif
+
+                                            {{-- FOLLOW-UP BADGE (if this is a child) --}}
+                                            @if($fq->followUpRule)
+                                                @php
+                                                    $parentFq = $form->formQuestions->firstWhere('id', $fq->followUpRule->parent_form_question_id);
+                                                @endphp
+                                                @if($parentFq)
+                                                    <div class="mt-2 inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded bg-yellow-50 border border-yellow-200 text-yellow-800">
+                                                        Follow-up of: #{{ $parentFq->position }}
+                                                        <span class="opacity-60">/</span>
+                                                        {{ \Illuminate\Support\Str::limit($parentFq->question->slug ?? 'parent', 40) }}
+                                                    </div>
+                                                @endif
+                                            @endif
                                         </td>
 
                                         <td class="p-2">
@@ -221,6 +235,22 @@
                                                 <button wire:click="qUp({{ $fq->id }})" class="px-2 py-1 rounded border">Up</button>
                                                 <button wire:click="qDown({{ $fq->id }})" class="px-2 py-1 rounded border">Down</button>
                                                 <button wire:click="detachQuestion({{ $fq->id }})" class="px-2 py-1 rounded border text-red-600">Detach</button>
+
+                                                {{-- FOLLOW-UP ACTIONS --}}
+                                                <button wire:click="openFollowUpModal({{ $fq->id }})"
+                                                        class="px-2 py-1 rounded border bg-white">
+                                                    {{ $fq->followUpRule ? 'Edit follow-up' : 'Make follow-up' }}
+                                                </button>
+                                                @if($fq->followUpRule)
+                                                    <button wire:click="snapChildAfterParent({{ $fq->id }})"
+                                                            class="px-2 py-1 rounded border">
+                                                        Snap after parent
+                                                    </button>
+                                                    <button wire:click="removeFollowUp({{ $fq->id }})"
+                                                            class="px-2 py-1 rounded border text-red-600">
+                                                        Remove follow-up
+                                                    </button>
+                                                @endif
                                             </div>
                                         </td>
 
@@ -503,6 +533,71 @@
                     <div class="mt-6 flex justify-end gap-2">
                         <button class="px-3 py-2 rounded border" wire:click="$set('createQuestionModal', false)">Cancel</button>
                         <button class="px-3 py-2 rounded bg-blue-600 text-white" wire:click="saveNewQuestion">Create</button>
+                    </div>
+                </div>
+            </div>
+        @endif
+
+        {{-- FOLLOW-UP CONFIG MODAL --}}
+        @if($followUpModal)
+            <div class="fixed inset-0 bg-black/30 flex items-center justify-center z-50" x-data x-cloak>
+                <div class="bg-white rounded-xl p-6 w-[720px] shadow-xl">
+                    <h2 class="text-lg font-semibold mb-3">Configure Follow-up</h2>
+
+                    <div class="space-y-3">
+                        <div>
+                            <label class="text-sm">Parent question</label>
+                            <select class="border rounded px-2 py-1 w-full"
+                                    wire:model="fuParentFqId"
+                                    wire:change="onFuParentChanged($event.target.value)">
+                                <option value="">— choose parent (must be above) —</option>
+                                @foreach($fuParentCandidates as $cand)
+                                    <option value="{{ $cand['id'] }}">{{ $cand['label'] }}</option>
+                                @endforeach
+                            </select>
+                            @error('fuParentFqId') <p class="text-red-600 text-sm">{{ $message }}</p> @enderror
+                        </div>
+
+                        <div wire:key="fu-opts-{{ $fuParentFqId ?? 'none' }}">
+                            <label class="text-sm">Trigger answers (parent options)</label>
+
+                            {{-- Loading hint while options refresh --}}
+                            <div wire:loading.class="opacity-50" wire:target="onFuParentChanged,fuParentFqId">
+                                <select class="border rounded px-2 py-1 w-full" multiple size="6"
+                                        wire:model="fuTriggerOptionIds">
+                                    @forelse($fuParentOptions as $opt)
+                                        <option value="{{ $opt['id'] }}">{{ $opt['label'] }}</option>
+                                    @empty
+                                        <option value="" disabled>— Select a parent to load options —</option>
+                                    @endforelse
+                                </select>
+                            </div>
+
+                            <p class="text-xs text-gray-500 mt-1">
+                                When any selected answer is chosen on the parent, this question will appear.
+                            </p>
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label class="text-sm">Required mode</label>
+                                <select class="border rounded px-2 py-1 w-full" wire:model="fuRequiredMode">
+                                    <option value="visible_only">Required only when visible</option>
+                                    <option value="always">Always required</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="text-sm">Display mode</label>
+                                <select class="border rounded px-2 py-1 w-full" wire:model="fuDisplayMode" disabled>
+                                    <option value="inline_after_parent">Inline after parent</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mt-6 flex justify-end gap-2">
+                        <button class="px-3 py-2 rounded border" wire:click="$set('followUpModal', false)">Cancel</button>
+                        <button class="px-3 py-2 rounded bg-blue-600 text-white" wire:click="saveFollowUp">Save</button>
                     </div>
                 </div>
             </div>

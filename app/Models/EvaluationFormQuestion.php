@@ -30,4 +30,14 @@ class EvaluationFormQuestion extends Model
     {
         return $this->belongsTo(Question::class, 'question_id');
     }
+	public function followUpRule() // this FQ is the CHILD if present
+{
+    return $this->hasOne(\App\Models\EvaluationFollowUp::class, 'child_form_question_id');
+}
+
+	public function childFollowUps() // this FQ is the PARENT of zero or more children
+	{
+		return $this->hasMany(\App\Models\EvaluationFollowUp::class, 'parent_form_question_id');
+	}
+
 }

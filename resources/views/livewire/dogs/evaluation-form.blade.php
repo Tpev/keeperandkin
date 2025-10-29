@@ -2,20 +2,10 @@
       x-data="{ s: @entangle('step') }"
       x-init="
         $watch('s', () => {
-          // Smooth scroll the window to the very top
           window.scrollTo({ top: 0, behavior: 'smooth' });
-
-          // Also try scrolling common app containers if present (optional safety nets)
-          const main = document.querySelector('main');
-          if (main) main.scrollTo({ top: 0, behavior: 'smooth' });
-          const app = document.getElementById('app');
-          if (app) app.scrollTo({ top: 0, behavior: 'smooth' });
-
-          // Focus the step heading without causing another jump
-          requestAnimationFrame(() => {
-            const h = document.getElementById('step-heading');
-            if (h) h.focus({ preventScroll: true });
-          });
+          const main = document.querySelector('main'); if (main) main.scrollTo({ top: 0, behavior: 'smooth' });
+          const app  = document.getElementById('app'); if (app)  app.scrollTo({ top: 0, behavior: 'smooth' });
+          requestAnimationFrame(() => { const h = document.getElementById('step-heading'); if (h) h.focus({ preventScroll: true }); });
         });
       "
 >
@@ -88,6 +78,10 @@
       border-radius:1rem; padding:.75rem 1rem;
       box-shadow:0 10px 30px rgba(3,49,76,.12);
     }
+    .kk-followup{ border-left:2px solid #BFDBFE; padding-left:.75rem; margin-left:.125rem; }
+    .kk-badge{ display:inline-flex; align-items:center; gap:.35rem; font-size:.7rem; padding:.15rem .4rem; border-radius:.375rem; border:1px solid #e5e7eb; background:#F9FAFB; color:#374151; }
+    .kk-badge-blue{ border-color:#BFDBFE; background:#EFF6FF; color:#1D4ED8; }
+    .kk-req{ color:#DC2626; }
   </style>
 
   {{-- ===== Current step/category only ===== --}}
@@ -99,23 +93,39 @@
     <div class="space-y-5">
       {{-- DB MODE --}}
       @if($this->useDbQuestions)
+        {{-- IMPORTANT: $this->currentQuestions is already filtered for visibility by the component --}}
         @foreach($this->currentQuestions as $q)
           @php
-            $qid = (int) ($q['id'] ?? 0);
-            $type = $q['type'] ?? null;
-            $opts = $q['options'] ?? [];
+            $qid     = (int) ($q['id'] ?? 0);
+            $type    = $q['type'] ?? null;
+            $opts    = $q['options'] ?? [];
+            $help    = $q['help_text'] ?? null;
+            $req     = !empty($q['required']) && (($q['visibility'] ?? 'always') === 'always');
+            $isFu    = is_array($q['follow_up'] ?? null) || is_array($q['follow_up_rule'] ?? null);
+            $booleanNoOpts = ($type === 'boolean') && (count($opts) === 0);
           @endphp
 
-          <div wire:key="db-qrow-{{ $qid }}">
-            <p class="font-medium mb-2">{{ $q['prompt'] ?? 'Question' }}</p>
+          <div wire:key="db-qrow-{{ $qid }}" class="{{ $isFu ? 'kk-followup' : '' }}">
+            <p class="font-medium mb-1 flex items-center gap-2">
+              <span>
+                {{ $q['prompt'] ?? 'Question' }}
+                @if($req) <span class="kk-req" title="Required">*</span> @endif
+              </span>
+              @if($isFu)
+                <span class="kk-badge kk-badge-blue" title="This question only appears based on a previous answer">Follow-up</span>
+              @endif
+            </p>
+            @if($help)
+              <p class="kk-help mb-2">{{ $help }}</p>
+            @endif
 
-            @if(in_array($type, ['single_choice','boolean'], true))
+            @if(in_array($type, ['single_choice','boolean'], true) && !$booleanNoOpts)
               <div class="grid sm:grid-cols-1 gap-2">
                 @php $i=1; @endphp
                 @foreach($opts as $opt)
                   <label class="kk-opt cursor-pointer" wire:key="db-opt-{{ $qid }}-{{ $opt['id'] }}">
                     <input type="radio"
-                           wire:model="answers.{{ $qid }}.answer_option_id"
+                           wire:model.live="answers.{{ $qid }}.answer_option_id"
                            value="{{ $opt['id'] }}"
                            class="ts-radio mt-1"
                            name="answers.{{ $qid }}.answer_option_id">
@@ -126,12 +136,34 @@
                 @endforeach
               </div>
 
+            @elseif($booleanNoOpts)
+              <div class="grid sm:grid-cols-1 gap-2">
+                <label class="kk-opt cursor-pointer" wire:key="db-opt-{{ $qid }}--1">
+                  <input type="radio"
+                         wire:model.live="answers.{{ $qid }}.answer_option_id"
+                         value="-1"
+                         class="ts-radio mt-1"
+                         name="answers.{{ $qid }}.answer_option_id">
+                  <span class="kk-chip">Y</span>
+                  <span class="text-sm">Yes</span>
+                </label>
+                <label class="kk-opt cursor-pointer" wire:key="db-opt-{{ $qid }}--2">
+                  <input type="radio"
+                         wire:model.live="answers.{{ $qid }}.answer_option_id"
+                         value="-2"
+                         class="ts-radio mt-1"
+                         name="answers.{{ $qid }}.answer_option_id">
+                  <span class="kk-chip">N</span>
+                  <span class="text-sm">No</span>
+                </label>
+              </div>
+
             @elseif($type === 'multi_choice')
               <div class="grid sm:grid-cols-1 gap-2">
                 @foreach($opts as $opt)
                   <label class="kk-opt cursor-pointer" wire:key="db-opt-{{ $qid }}-{{ $opt['id'] }}">
                     <input type="checkbox"
-                           wire:model="answers.{{ $qid }}.answer_option_ids"
+                           wire:model.live="answers.{{ $qid }}.answer_option_ids"
                            value="{{ $opt['id'] }}"
                            name="answers.{{ $qid }}.answer_option_ids[]"
                            class="ts-checkbox mt-1">
@@ -184,7 +216,7 @@
                 @foreach(($q['options'] ?? []) as $optKey => $opt)
                   <label class="kk-opt cursor-pointer" wire:key="legacy-opt-{{ $qKey }}-{{ $optKey }}-{{ $this->step }}">
                     <input type="radio"
-                          wire:model="answers.{{ $qKey }}"
+                          wire:model.live="answers.{{ $qKey }}"
                           value="{{ $optKey }}"
                           class="ts-radio mt-1"
                           name="answers.{{ $qKey }}">
@@ -199,11 +231,11 @@
 
             @elseif(($q['type'] ?? null) === 'checkbox')
               <div class="grid sm:grid-cols-1 gap-2">
-                @foreach(($q['options'] ?? []) as $optKey => $opt)
-                  <label class="kk-opt cursor-pointer" wire:key="legacy-opt-{{ $qKey }}-{{ $optKey }}-{{ $this->step }}">
+                @foreach(($q['options'] ?? []) as $opt)
+                  <label class="kk-opt cursor-pointer" wire:key="legacy-opt-{{ $qKey }}-{{ $opt['label'] }}-{{ $this->step }}">
                     <input type="checkbox"
-                          wire:model="answers.{{ $qKey }}"
-                          value="{{ $optKey }}"
+                          wire:model.live="answers.{{ $qKey }}"
+                          value="{{ $opt['label'] }}"
                           name="answers.{{ $qKey }}[]"
                           class="ts-checkbox mt-1">
                     <span class="kk-chip">•</span>
