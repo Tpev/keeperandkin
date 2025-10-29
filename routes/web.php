@@ -23,6 +23,21 @@ use App\Livewire\Admin\TrainingSessionsManager;
 use App\Livewire\Admin\CertificationProgramsManager;
 use App\Livewire\Learn\ProgramsIndex;
 use App\Livewire\Learn\ProgramShow;
+use App\Http\Controllers\DogPdfController;
+use chillerlan\QRCode\QRCode;
+use chillerlan\QRCode\QROptions;
+use App\Http\Controllers\DogEvaluationController;
+
+Route::middleware('auth')->group(function () {
+    Route::get('/dogs/{dog}/evaluations/{evaluation}', [DogEvaluationController::class, 'show'])
+        ->name('dogs.evaluations.show');
+});
+
+Route::middleware(['auth']) // keep your usual middlewares
+    ->group(function () {
+        Route::get('/dogs/{dog}/pdf', [DogPdfController::class, 'overview'])
+            ->name('dogs.pdf.overview');
+    });
 
 Route::middleware(['auth'])->group(function () {
     Route::get('/learn', ProgramsIndex::class)->name('learn.index');

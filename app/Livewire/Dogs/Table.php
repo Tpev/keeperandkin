@@ -1,9 +1,11 @@
 <?php
+
 namespace App\Livewire\Dogs;
 
 use Livewire\Component;
 use Livewire\WithPagination;
 use App\Models\Dog;
+use App\Models\Team;
 use Illuminate\Support\Facades\Auth;
 
 class Table extends Component
@@ -40,13 +42,38 @@ class Table extends Component
         $this->resetPage();
     }
 
+    public function updateTeam(int $dogId, $newTeamId): void
+    {
+        // Admins only
+        abort_unless((bool) (Auth::user()->is_admin ?? false), 403);
+
+        $newTeamId = (int) $newTeamId;
+        if (! Team::query()->whereKey($newTeamId)->exists()) {
+            // fire a small browser event (v3 way) for optional UI feedback
+            $this->dispatch('kk:team-update-failed', reason: 'Team not found');
+            return;
+        }
+
+        $dog = Dog::findOrFail($dogId);
+        $dog->update(['team_id' => $newTeamId]);
+
+        // Refresh current page (in case filters/pagination change)
+        $this->resetPage();
+
+        // Livewire v3 browser event
+        $this->dispatch('kk:team-updated', dogId: $dogId, teamId: $newTeamId);
+    }
+
     public function render()
     {
-        $team = Auth::user()->currentTeam;
+        $user     = Auth::user();
+        $isAdmin  = (bool) ($user->is_admin ?? false);
+        $team     = $user->currentTeam;
 
         $dogs = Dog::query()
-            ->where('team_id', $team->id)
-            // Eager-load latestEvaluation; fully-qualify columns AND only select existing fields
+            // Admins see all teams; others see only their team
+            ->when(!$isAdmin && $team, fn ($q) => $q->where('team_id', $team->id))
+            ->with(['team:id,name'])
             ->with(['latestEvaluation' => function ($q) {
                 $t = $q->getModel()->getTable(); // usually 'evaluations'
                 $q->select(
@@ -83,7 +110,7 @@ class Table extends Component
             });
         }
 
-        // Flags (JSON length check; if your DB lacks JSON_LENGTH, adjust accordingly)
+        // Flags
         if ($this->flags === 'with') {
             $dogs->whereHas('latestEvaluation', function ($q) {
                 $q->whereRaw("json_length(red_flags) > 0");
@@ -104,9 +131,15 @@ class Table extends Component
             ['index' => 'age',   'label' => 'Age'],
             ['index' => 'sex',   'label' => 'Sex'],
             ['index' => 'score', 'label' => 'Scores (C/S/T)'],
-            ['index' => 'flag',  'label' => 'Flag'],
-            ['index' => 'action'],
         ];
+
+        // Only admins get the Team column header
+        if ($isAdmin) {
+            $headers[] = ['index' => 'team', 'label' => 'Team'];
+        }
+
+        $headers[] = ['index' => 'flag',  'label' => 'Flag'];
+        $headers[] = ['index' => 'action'];
 
         return view('livewire.dogs.table', compact('headers', 'rows'));
     }
