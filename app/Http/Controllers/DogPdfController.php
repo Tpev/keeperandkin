@@ -6,6 +6,8 @@ use App\Models\Dog;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
+use Intervention\Image\Facades\Image;
+
 
 // QR code (GD PNG output)
 use chillerlan\QRCode\QRCode;
@@ -79,24 +81,51 @@ class DogPdfController extends Controller
             ->stream('Dog-'.$dog->id.'-Overview.pdf');
     }
 
-    private function imageToDataUri(?string $pathOrUrl): string
-    {
-        // storage/app/public
-        if ($pathOrUrl && Storage::disk('public')->exists($pathOrUrl)) {
-            $abs  = Storage::disk('public')->path($pathOrUrl);
-            $mime = mime_content_type($abs) ?: 'image/jpeg';
-            $data = @file_get_contents($abs) ?: '';
-            if ($data !== '') return 'data:'.$mime.';base64,'.base64_encode($data);
+
+
+private function imageToDataUri(?string $pathOrUrl): string
+{
+    $process = function (string $abs): ?string {
+        // Try Intervention first (with conditional EXIF), then fall back to raw bytes
+        try {
+            $img = Image::make($abs);
+
+            if (function_exists('exif_read_data')) {
+                // Only call orientate if EXIF exists locally
+                $img->orientate();
+            }
+
+            // Keep memory under control for DomPDF
+            $img->resize(1600, null, function ($c) { $c->aspectRatio(); $c->upsize(); });
+
+            $bytes = (string) $img->encode('jpg', 85); // strip EXIF, flatten
+            return 'data:image/jpeg;base64,' . base64_encode($bytes);
+        } catch (\Throwable $e) {
+            // Fallback: raw file bytes (works even without EXIF/Intervention)
+            $bytes = @file_get_contents($abs);
+            if ($bytes !== false && $bytes !== '') {
+                $mime = mime_content_type($abs) ?: 'image/jpeg';
+                return 'data:' . $mime . ';base64,' . base64_encode($bytes);
+            }
+            return null;
         }
-        // /public path
-        if ($pathOrUrl && is_file(public_path($pathOrUrl))) {
-            $abs  = public_path($pathOrUrl);
-            $mime = mime_content_type($abs) ?: 'image/jpeg';
-            $data = @file_get_contents($abs) ?: '';
-            if ($data !== '') return 'data:'.$mime.';base64,'.base64_encode($data);
-        }
-        // fallback placeholder
-        $svg = '<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512"><rect width="100%" height="100%" fill="#e5e7eb"/><text x="50%" y="50%" font-size="28" text-anchor="middle" fill="#6b7280" dy=".3em">Dog</text></svg>';
-        return 'data:image/svg+xml;base64,'.base64_encode($svg);
+    };
+
+    // storage/app/public
+    if ($pathOrUrl && \Storage::disk('public')->exists($pathOrUrl)) {
+        $abs = \Storage::disk('public')->path($pathOrUrl);
+        if ($dataUri = $process($abs)) return $dataUri;
     }
+
+    // public/ path
+    if ($pathOrUrl && is_file(public_path($pathOrUrl))) {
+        $abs = public_path($pathOrUrl);
+        if ($dataUri = $process($abs)) return $dataUri;
+    }
+
+    // Last-resort PNG placeholder (DomPDF-friendly; avoid SVG data URIs)
+    $blankPng = base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAuMBgVd2+5kAAAAASUVORK5CYII=');
+    return 'data:image/png;base64,' . base64_encode($blankPng);
+}
+
 }
