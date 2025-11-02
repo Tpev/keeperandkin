@@ -19,11 +19,10 @@ class DogPdfController extends Controller
     public function overview(Request $request, Dog $dog)
     {
         $dog->loadMissing(['latestEvaluation']);
+
         $profileUrl = route('dogs.show', $dog);
 
-        /**
-         * Generate QR PNG file
-         */
+        // --- QR (writes a real PNG file so DomPDF can load it) ---
         $options = new QROptions;
         $options->outputInterface  = QRGdImagePNG::class;
         $options->eccLevel         = QRCode::ECC_L;
@@ -31,24 +30,26 @@ class DogPdfController extends Controller
         $options->margin           = 0;
         $options->outputBase64     = false;
 
-        $qrBytes = (new QRCode($options))->render($profileUrl);
-        $qrDir   = storage_path('app/public/qr');
+        $qrPngBytes = (new QRCode($options))->render($profileUrl);
+
+        $qrDir = storage_path('app/public/qr');
         if (!is_dir($qrDir)) @mkdir($qrDir, 0775, true);
         $qrFile  = sprintf('dog-%d-%s.png', $dog->id, substr(md5($profileUrl), 0, 8));
         $qrAbs   = $qrDir . DIRECTORY_SEPARATOR . $qrFile;
-        file_put_contents($qrAbs, $qrBytes);
+        file_put_contents($qrAbs, $qrPngBytes);
         $qrFileUri = 'file://' . $qrAbs;
 
-        /**
-         * Prepare data for view
-         */
+        // --- Oriented photo for PDF (physical rotation, EXIF stripped) ---
+        $photoRel = $dog->photo ?? $dog->photo_path ?? null; // your field names
+        $photoFileUri = $this->imageToFileUriForPdf($photoRel);
+
         $data = [
-            'dog'          => $dog,
-            'latestEval'   => $dog->latestEvaluation,
-            'photoFileUri' => $this->imageToFileUri($dog->photo ?? $dog->photo_path ?? null),
-            'qrFileUri'    => $qrFileUri,
-            'profileUrl'   => $profileUrl,
-            'palette'      => [
+            'dog'            => $dog,
+            'latestEval'     => $dog->latestEvaluation,
+            'qrFileUri'      => $qrFileUri,
+            'photoFileUri'   => $photoFileUri,  // <-- Blade uses this
+            'profileUrl'     => $profileUrl,
+            'palette'        => [
                 'NAVY'     => '#03314C',
                 'BLUE'     => '#076BA8',
                 'BLUE_ALT' => '#DAEEFF',
@@ -66,65 +67,66 @@ class DogPdfController extends Controller
         return Pdf::loadHTML($html)
             ->setPaper('a4', 'landscape')
             ->setWarnings(false)
-            ->setOption('isRemoteEnabled', true)
-            ->setOption('chroot', base_path())  // allow storage paths
+            ->setOption('isRemoteEnabled', true) // allow file://
             ->setOption('dpi', 96)
             ->setOption('isHtml5ParserEnabled', false)
-            ->stream('Dog-' . $dog->id . '-Overview.pdf');
+            ->stream('Dog-'.$dog->id.'-Overview.pdf');
     }
 
     /**
-     * Normalize image orientation and return file:// URI
+     * Turn a stored image (public disk or public path) into a DomPDF-safe, physically oriented JPG.
+     * Returns file:// URI or null if not found.
      */
-    private function imageToFileUri(?string $pathOrUrl): ?string
+    private function imageToFileUriForPdf(?string $relOrPublicPath): ?string
     {
-        $process = function (string $abs): ?string {
-            try {
-                $img = Image::make($abs);
-                if (function_exists('exif_read_data')) {
-                    $img->orientate();
-                }
-
-                // Resize for PDF and flatten EXIF
-                $img->resize(1600, null, function ($c) {
-                    $c->aspectRatio();
-                    $c->upsize();
-                })->encode('jpg', 85);
-
-                $dir = storage_path('app/public/pdf-cache');
-                if (!is_dir($dir)) @mkdir($dir, 0775, true);
-                $fname = 'dog-photo-' . Str::random(10) . '.jpg';
-                $out = $dir . DIRECTORY_SEPARATOR . $fname;
-                $img->save($out);
-
-                return 'file://' . $out;
-            } catch (\Throwable $e) {
-                // Fallback: copy raw file
-                $bytes = @file_get_contents($abs);
-                if ($bytes) {
-                    $dir = storage_path('app/public/pdf-cache');
-                    if (!is_dir($dir)) @mkdir($dir, 0775, true);
-                    $ext = pathinfo($abs, PATHINFO_EXTENSION) ?: 'jpg';
-                    $out = $dir . DIRECTORY_SEPARATOR . 'dog-photo-raw-' . Str::random(8) . '.' . $ext;
-                    @file_put_contents($out, $bytes);
-                    return 'file://' . $out;
-                }
-                return null;
+        // Locate original absolute path
+        $abs = null;
+        if ($relOrPublicPath) {
+            if (Storage::disk('public')->exists($relOrPublicPath)) {
+                $abs = Storage::disk('public')->path($relOrPublicPath);
+            } elseif (is_file(public_path($relOrPublicPath))) {
+                $abs = public_path($relOrPublicPath);
             }
-        };
-
-        // Try storage disk
-        if ($pathOrUrl && Storage::disk('public')->exists($pathOrUrl)) {
-            $abs = Storage::disk('public')->path($pathOrUrl);
-            if ($uri = $process($abs)) return $uri;
         }
+        if (!$abs || !is_file($abs)) return null;
 
-        // Try public/
-        if ($pathOrUrl && is_file(public_path($pathOrUrl))) {
-            $abs = public_path($pathOrUrl);
-            if ($uri = $process($abs)) return $uri;
+        // Prepare cache target
+        $cacheDir = storage_path('app/public/pdf-cache');
+        if (!is_dir($cacheDir)) @mkdir($cacheDir, 0775, true);
+        $out = $cacheDir.'/dog-photo-'.Str::random(10).'.jpg';
+
+        try {
+            $img = Image::make($abs);
+
+            // 1) Try Intervention’s orientate() (uses EXIF if available)
+            if (function_exists('exif_read_data')) {
+                try { $img->orientate(); } catch (\Throwable $e) {}
+            }
+
+            // 2) Also read EXIF orientation ourselves and apply manual rotation if needed
+            $orientation = null;
+            if (function_exists('exif_read_data')) {
+                try {
+                    $exif = @exif_read_data($abs);
+                    $orientation = $exif['Orientation'] ?? null; // 6=90 CW, 8=270 CW, 3=180
+                } catch (\Throwable $e) {}
+            }
+            if (in_array($orientation, [3, 6, 8], true)) {
+                // Match EXIF spec: 6 is 90° CW -> rotate -90
+                if ($orientation === 3) $img->rotate(180);
+                if ($orientation === 6) $img->rotate(-90);
+                if ($orientation === 8) $img->rotate(90);
+            }
+
+            // Keep size reasonable for PDF, strip EXIF by re-encoding
+            $img->resize(1600, null, function ($c) { $c->aspectRatio(); $c->upsize(); });
+            $img->encode('jpg', 85)->save($out);
+
+            return 'file://'.$out;
+        } catch (\Throwable $e) {
+            // Fallback: copy as-is so at least something renders
+            @copy($abs, $out);
+            return 'file://'.$out;
         }
-
-        return null;
     }
 }
