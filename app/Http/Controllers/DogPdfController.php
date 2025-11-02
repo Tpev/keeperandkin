@@ -40,14 +40,14 @@ class DogPdfController extends Controller
         $qrFileUri = 'file://' . $qrAbs;
 
         // --- Oriented photo for PDF (physical rotation, EXIF stripped) ---
-        $photoRel = $dog->photo ?? $dog->photo_path ?? null;
+        $photoRel = $dog->photo ?? $dog->photo_path ?? null; // adapt to your column
         $photoFileUri = $this->imageToFileUriForPdf($photoRel);
 
         $data = [
             'dog'            => $dog,
             'latestEval'     => $dog->latestEvaluation,
             'qrFileUri'      => $qrFileUri,
-            'photoFileUri'   => $photoFileUri,  // <-- Blade uses this
+            'photoFileUri'   => $photoFileUri,  // Blade uses this
             'profileUrl'     => $profileUrl,
             'palette'        => [
                 'NAVY'     => '#03314C',
@@ -96,11 +96,15 @@ class DogPdfController extends Controller
         $out = $cacheDir.'/dog-photo-'.Str::random(10).'.jpg';
 
         try {
+            // IMPORTANT: orientate() BEFORE any resize/fit to honor EXIF
             $img = Image::make($abs)->orientate();
 
-
             // Keep size reasonable for PDF, strip EXIF by re-encoding
-            $img->resize(1600, null, function ($c) { $c->aspectRatio(); $c->upsize(); });
+            $img->resize(1600, null, function ($c) {
+                $c->aspectRatio();
+                $c->upsize();
+            });
+
             $img->encode('jpg', 85)->save($out);
 
             return 'file://'.$out;
