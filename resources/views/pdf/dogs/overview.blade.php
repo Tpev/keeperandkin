@@ -143,7 +143,13 @@
                 <table class="card no-break" style="margin-bottom:5px;">
                     <tr><td class="cb" style="padding:4px; text-align:center;">
                         <div class="photo-wrap">
-                            <img class="photo" src="{{ $photoDataUri }}" alt="{{ $name }}">
+                            @if(!empty($photoFileUri))
+                                <img class="photo" src="{{ $photoFileUri }}" alt="{{ $name }}">
+                            @else
+                                <div style="width:100%;height:100%;background:#e5e7eb;color:#6b7280;display:flex;align-items:center;justify-content:center;">
+                                    No photo
+                                </div>
+                            @endif
                         </div>
                     </td></tr>
                 </table>

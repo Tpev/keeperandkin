@@ -6,8 +6,8 @@ use App\Models\Dog;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Intervention\Image\Facades\Image;
-
 
 // QR code (GD PNG output)
 use chillerlan\QRCode\QRCode;
@@ -19,42 +19,33 @@ class DogPdfController extends Controller
     public function overview(Request $request, Dog $dog)
     {
         $dog->loadMissing(['latestEvaluation']);
-
         $profileUrl = route('dogs.show', $dog);
 
         /**
-         * Generate QR PNG to a real file (most reliable for DomPDF)
+         * Generate QR PNG file
          */
         $options = new QROptions;
-        $options->outputInterface  = QRGdImagePNG::class; // <- use the GD image outputter
+        $options->outputInterface  = QRGdImagePNG::class;
         $options->eccLevel         = QRCode::ECC_L;
-        $options->scale            = 4;      // size of modules (increase if needed)
-        $options->margin           = 0;      // tight QR
-        $options->outputBase64     = false;  // we want raw PNG bytes
+        $options->scale            = 4;
+        $options->margin           = 0;
+        $options->outputBase64     = false;
 
-        $qrPngBytes = (new QRCode($options))->render($profileUrl);
-
-        // Ensure storage path exists
-        $dir   = storage_path('app/public/qr');
-        if (!is_dir($dir)) {
-            @mkdir($dir, 0775, true);
-        }
-        $file  = sprintf('dog-%d-%s.png', $dog->id, substr(md5($profileUrl), 0, 8));
-        $abs   = $dir . DIRECTORY_SEPARATOR . $file;
-
-        // Write the PNG bytes
-        file_put_contents($abs, $qrPngBytes);
-
-        // Build a file:// URI for DomPDF <img src>
-        $qrFileUri = 'file://' . $abs;
+        $qrBytes = (new QRCode($options))->render($profileUrl);
+        $qrDir   = storage_path('app/public/qr');
+        if (!is_dir($qrDir)) @mkdir($qrDir, 0775, true);
+        $qrFile  = sprintf('dog-%d-%s.png', $dog->id, substr(md5($profileUrl), 0, 8));
+        $qrAbs   = $qrDir . DIRECTORY_SEPARATOR . $qrFile;
+        file_put_contents($qrAbs, $qrBytes);
+        $qrFileUri = 'file://' . $qrAbs;
 
         /**
-         * View data (no logo for now)
+         * Prepare data for view
          */
         $data = [
             'dog'          => $dog,
             'latestEval'   => $dog->latestEvaluation,
-            'photoDataUri' => $this->imageToDataUri($dog->photo ?? $dog->photo_path ?? null),
+            'photoFileUri' => $this->imageToFileUri($dog->photo ?? $dog->photo_path ?? null),
             'qrFileUri'    => $qrFileUri,
             'profileUrl'   => $profileUrl,
             'palette'      => [
@@ -75,57 +66,65 @@ class DogPdfController extends Controller
         return Pdf::loadHTML($html)
             ->setPaper('a4', 'landscape')
             ->setWarnings(false)
-            ->setOption('isRemoteEnabled', true)     // allow file:// URIs
+            ->setOption('isRemoteEnabled', true)
+            ->setOption('chroot', base_path())  // allow storage paths
             ->setOption('dpi', 96)
             ->setOption('isHtml5ParserEnabled', false)
-            ->stream('Dog-'.$dog->id.'-Overview.pdf');
+            ->stream('Dog-' . $dog->id . '-Overview.pdf');
     }
 
+    /**
+     * Normalize image orientation and return file:// URI
+     */
+    private function imageToFileUri(?string $pathOrUrl): ?string
+    {
+        $process = function (string $abs): ?string {
+            try {
+                $img = Image::make($abs);
+                if (function_exists('exif_read_data')) {
+                    $img->orientate();
+                }
 
+                // Resize for PDF and flatten EXIF
+                $img->resize(1600, null, function ($c) {
+                    $c->aspectRatio();
+                    $c->upsize();
+                })->encode('jpg', 85);
 
-private function imageToDataUri(?string $pathOrUrl): string
-{
-    $process = function (string $abs): ?string {
-        // Try Intervention first (with conditional EXIF), then fall back to raw bytes
-        try {
-            $img = Image::make($abs);
+                $dir = storage_path('app/public/pdf-cache');
+                if (!is_dir($dir)) @mkdir($dir, 0775, true);
+                $fname = 'dog-photo-' . Str::random(10) . '.jpg';
+                $out = $dir . DIRECTORY_SEPARATOR . $fname;
+                $img->save($out);
 
-            if (function_exists('exif_read_data')) {
-                // Only call orientate if EXIF exists locally
-                $img->orientate();
+                return 'file://' . $out;
+            } catch (\Throwable $e) {
+                // Fallback: copy raw file
+                $bytes = @file_get_contents($abs);
+                if ($bytes) {
+                    $dir = storage_path('app/public/pdf-cache');
+                    if (!is_dir($dir)) @mkdir($dir, 0775, true);
+                    $ext = pathinfo($abs, PATHINFO_EXTENSION) ?: 'jpg';
+                    $out = $dir . DIRECTORY_SEPARATOR . 'dog-photo-raw-' . Str::random(8) . '.' . $ext;
+                    @file_put_contents($out, $bytes);
+                    return 'file://' . $out;
+                }
+                return null;
             }
+        };
 
-            // Keep memory under control for DomPDF
-            $img->resize(1600, null, function ($c) { $c->aspectRatio(); $c->upsize(); });
-
-            $bytes = (string) $img->encode('jpg', 85); // strip EXIF, flatten
-            return 'data:image/jpeg;base64,' . base64_encode($bytes);
-        } catch (\Throwable $e) {
-            // Fallback: raw file bytes (works even without EXIF/Intervention)
-            $bytes = @file_get_contents($abs);
-            if ($bytes !== false && $bytes !== '') {
-                $mime = mime_content_type($abs) ?: 'image/jpeg';
-                return 'data:' . $mime . ';base64,' . base64_encode($bytes);
-            }
-            return null;
+        // Try storage disk
+        if ($pathOrUrl && Storage::disk('public')->exists($pathOrUrl)) {
+            $abs = Storage::disk('public')->path($pathOrUrl);
+            if ($uri = $process($abs)) return $uri;
         }
-    };
 
-    // storage/app/public
-    if ($pathOrUrl && \Storage::disk('public')->exists($pathOrUrl)) {
-        $abs = \Storage::disk('public')->path($pathOrUrl);
-        if ($dataUri = $process($abs)) return $dataUri;
+        // Try public/
+        if ($pathOrUrl && is_file(public_path($pathOrUrl))) {
+            $abs = public_path($pathOrUrl);
+            if ($uri = $process($abs)) return $uri;
+        }
+
+        return null;
     }
-
-    // public/ path
-    if ($pathOrUrl && is_file(public_path($pathOrUrl))) {
-        $abs = public_path($pathOrUrl);
-        if ($dataUri = $process($abs)) return $dataUri;
-    }
-
-    // Last-resort PNG placeholder (DomPDF-friendly; avoid SVG data URIs)
-    $blankPng = base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAuMBgVd2+5kAAAAASUVORK5CYII=');
-    return 'data:image/png;base64,' . base64_encode($blankPng);
-}
-
 }
