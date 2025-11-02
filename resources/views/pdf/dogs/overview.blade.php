@@ -207,7 +207,10 @@
                                 @php $count = count($row); @endphp
                                 <tr>
                                     @foreach($row as $i => $f)
-                                        @php $isLastCell = ($i === $count - 1); $colspan = ($isLastCell && $count < 2) ? (2 - ($count - 1)) : 1; @endphp
+                                        @php
+                                            $isLastCell = ($i === $count - 1);
+                                            $colspan = ($isLastCell && $count < 2) ? (2 - ($count - 1)) : 1;
+                                        @endphp
                                         {!! $cell($f['label'], $f['value'], $colspan) !!}
                                     @endforeach
                                 </tr>
