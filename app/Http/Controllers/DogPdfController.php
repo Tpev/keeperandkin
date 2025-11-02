@@ -40,7 +40,7 @@ class DogPdfController extends Controller
         $qrFileUri = 'file://' . $qrAbs;
 
         // --- Oriented photo for PDF (physical rotation, EXIF stripped) ---
-        $photoRel = $dog->photo ?? $dog->photo_path ?? null; // your field names
+        $photoRel = $dog->photo ?? $dog->photo_path ?? null;
         $photoFileUri = $this->imageToFileUriForPdf($photoRel);
 
         $data = [
@@ -112,7 +112,7 @@ class DogPdfController extends Controller
                 } catch (\Throwable $e) {}
             }
             if (in_array($orientation, [3, 6, 8], true)) {
-                // Match EXIF spec: 6 is 90° CW -> rotate -90
+                // EXIF spec: 6 is 90° CW -> rotate -90 (counter-clockwise)
                 if ($orientation === 3) $img->rotate(180);
                 if ($orientation === 6) $img->rotate(-90);
                 if ($orientation === 8) $img->rotate(90);
