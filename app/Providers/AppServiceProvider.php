@@ -6,6 +6,8 @@ use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Facades\Gate;
 use App\Models\User;
 use App\Enums\Role;
+use App\Models\Dog;
+use App\Observers\DogObserver;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -22,6 +24,7 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+		Dog::observe(DogObserver::class);
         // ────── Role-based Gates ──────
         Gate::define('admin-only', fn (User $user) =>
             $user->role === Role::ADMIN
