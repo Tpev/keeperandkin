@@ -96,27 +96,8 @@ class DogPdfController extends Controller
         $out = $cacheDir.'/dog-photo-'.Str::random(10).'.jpg';
 
         try {
-            $img = Image::make($abs);
+            $img = Image::make($abs)->orientate();
 
-            // 1) Try Intervention’s orientate() (uses EXIF if available)
-            if (function_exists('exif_read_data')) {
-                try { $img->orientate(); } catch (\Throwable $e) {}
-            }
-
-            // 2) Also read EXIF orientation ourselves and apply manual rotation if needed
-            $orientation = null;
-            if (function_exists('exif_read_data')) {
-                try {
-                    $exif = @exif_read_data($abs);
-                    $orientation = $exif['Orientation'] ?? null; // 6=90 CW, 8=270 CW, 3=180
-                } catch (\Throwable $e) {}
-            }
-            if (in_array($orientation, [3, 6, 8], true)) {
-                // EXIF spec: 6 is 90° CW -> rotate -90 (counter-clockwise)
-                if ($orientation === 3) $img->rotate(180);
-                if ($orientation === 6) $img->rotate(-90);
-                if ($orientation === 8) $img->rotate(90);
-            }
 
             // Keep size reasonable for PDF, strip EXIF by re-encoding
             $img->resize(1600, null, function ($c) { $c->aspectRatio(); $c->upsize(); });
