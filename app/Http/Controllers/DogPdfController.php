@@ -7,7 +7,10 @@ use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
-use Intervention\Image\Facades\Image;
+
+// Intervention Image v3 (NO facade)
+use Intervention\Image\ImageManager;
+use Intervention\Image\Drivers\Gd\Driver;
 
 // QR code (GD PNG output)
 use chillerlan\QRCode\QRCode;
@@ -75,7 +78,7 @@ class DogPdfController extends Controller
 
     /**
      * Turn a stored image (public disk or public path) into a DomPDF-safe, physically oriented JPG.
-     * Returns file:// URI or null if not found.
+     * Uses Intervention Image v3. Returns file:// URI or null if not found.
      */
     private function imageToFileUriForPdf(?string $relOrPublicPath): ?string
     {
@@ -93,25 +96,28 @@ class DogPdfController extends Controller
         // Prepare cache target
         $cacheDir = storage_path('app/public/pdf-cache');
         if (!is_dir($cacheDir)) @mkdir($cacheDir, 0775, true);
-        $out = $cacheDir.'/dog-photo-'.Str::random(10).'.jpg';
+        $out = $cacheDir . '/dog-photo-' . Str::random(10) . '.jpg';
 
         try {
-            // IMPORTANT: orientate() BEFORE any resize/fit to honor EXIF
-            $img = Image::make($abs)->orientate();
+            // Intervention Image v3 manager (GD)
+            // autoOrientation is enabled by default, but we'll be explicit with ->orient()
+            $manager = new ImageManager(Driver::class);
 
-            // Keep size reasonable for PDF, strip EXIF by re-encoding
-            $img->resize(1600, null, function ($c) {
-                $c->aspectRatio();
-                $c->upsize();
-            });
+            // Read + orient according to EXIF
+            $img = $manager->read($abs)->orient();
 
-            $img->encode('jpg', 85)->save($out);
+            // Keep size reasonable for PDF, preserve aspect ratio
+            // v3 API: scaleDown() with width keeps aspect ratio automatically
+            $img->scaleDown(width: 1600);
 
-            return 'file://'.$out;
+            // Encode as JPEG (strips EXIF) and save
+            $img->toJpeg(quality: 85)->save($out);
+
+            return 'file://' . $out;
         } catch (\Throwable $e) {
             // Fallback: copy as-is so at least something renders
             @copy($abs, $out);
-            return 'file://'.$out;
+            return 'file://' . $out;
         }
     }
 }
