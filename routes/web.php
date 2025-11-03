@@ -28,8 +28,6 @@ use chillerlan\QRCode\QRCode;
 use chillerlan\QRCode\QROptions;
 use App\Http\Controllers\DogEvaluationController;
 
-Route::get('/dogs/{dog}/photo-test', [DogPdfController::class, 'photoTest'])
-    ->name('dogs.photo-test');
 Route::middleware('auth')->group(function () {
     Route::get('/dogs/{dog}/evaluations/{evaluation}', [DogEvaluationController::class, 'show'])
         ->name('dogs.evaluations.show');

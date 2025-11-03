@@ -6,117 +6,118 @@ use App\Models\Dog;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 
-// Intervention Image v3 (no facade)
+// Intervention Image v3 (NO facade)
 use Intervention\Image\ImageManager;
 use Intervention\Image\Drivers\Gd\Driver;
 
+// QR code (GD PNG output)
+use chillerlan\QRCode\QRCode;
+use chillerlan\QRCode\QROptions;
+use chillerlan\QRCode\Output\QRGdImagePNG;
+
 class DogPdfController extends Controller
 {
-    /**
-     * QUICK VISUAL TEST (recommended first):
-     * Returns the oriented JPEG bytes directly in the browser, no PDF.
-     * Route GET /dogs/{dog}/photo-test to this to validate orientation fast.
-     */
-    public function photoTest(Request $request, Dog $dog)
+    public function overview(Request $request, Dog $dog)
     {
-        $rel = $dog->photo ?? $dog->photo_path ?? null;
-        if (!$rel || !Storage::disk('public')->exists($rel)) {
-            abort(404, 'Photo not found on public disk.');
-        }
+        $dog->loadMissing(['latestEvaluation']);
 
-        $abs = Storage::disk('public')->path($rel);
+        $profileUrl = route('dogs.show', $dog);
 
-        // v3 manager (GD); auto EXIF orientation is on by default,
-        // but we call ->orient() explicitly to be safe.
-        $manager = new ImageManager(Driver::class);
+        // --- QR (writes a real PNG file so DomPDF can load it) ---
+        $options = new QROptions;
+        $options->outputInterface  = QRGdImagePNG::class;
+        $options->eccLevel         = QRCode::ECC_L;
+        $options->scale            = 4;
+        $options->margin           = 0;
+        $options->outputBase64     = false;
 
-        try {
-            $img = $manager->read($abs)->orient(); // ← core fix
+        $qrPngBytes = (new QRCode($options))->render($profileUrl);
 
-            // optional: cap width so we don’t send 10MB to the browser
-            $img->scaleDown(width: 1600);
+        $qrDir = storage_path('app/public/qr');
+        if (!is_dir($qrDir)) @mkdir($qrDir, 0775, true);
+        $qrFile  = sprintf('dog-%d-%s.png', $dog->id, substr(md5($profileUrl), 0, 8));
+        $qrAbs   = $qrDir . DIRECTORY_SEPARATOR . $qrFile;
+        file_put_contents($qrAbs, $qrPngBytes);
+        $qrFileUri = 'file://' . $qrAbs;
 
-            // Encode to JPEG and send raw bytes
-            $encoded = $img->toJpeg(quality: 85);
+        // --- Oriented photo for PDF (physical rotation, EXIF stripped) ---
+        $photoRel = $dog->photo ?? $dog->photo_path ?? null; // adapt to your column
+        $photoFileUri = $this->imageToFileUriForPdf($photoRel);
 
-            return response($encoded->getString(), 200, [
-                'Content-Type' => 'image/jpeg',
-                'Cache-Control' => 'no-store, no-cache, must-revalidate, max-age=0',
-            ]);
-        } catch (\Throwable $e) {
-            abort(500, 'Failed to read/orient image: '.$e->getMessage());
-        }
+        $data = [
+            'dog'            => $dog,
+            'latestEval'     => $dog->latestEvaluation,
+            'qrFileUri'      => $qrFileUri,
+            'photoFileUri'   => $photoFileUri,  // Blade uses this
+            'profileUrl'     => $profileUrl,
+            'palette'        => [
+                'NAVY'     => '#03314C',
+                'BLUE'     => '#076BA8',
+                'BLUE_ALT' => '#DAEEFF',
+                'DIVIDER'  => '#E2E8F0',
+                'DANGER'   => '#DC2626',
+                'GREEN'    => '#16A34A',
+                'ORANGE'   => '#F97316',
+                'YELLOW'   => '#FFCC00',
+                'OK'       => '#94A3B8',
+            ],
+        ];
+
+        $html = view('pdf.dogs.overview', $data)->render();
+
+        return Pdf::loadHTML($html)
+            ->setPaper('a4', 'landscape')
+            ->setWarnings(false)
+            ->setOption('isRemoteEnabled', true) // allow file://
+            ->setOption('dpi', 96)
+            ->setOption('isHtml5ParserEnabled', false)
+            ->stream('Dog-'.$dog->id.'-Overview.pdf');
     }
 
     /**
-     * BAREBONES PDF (image only):
-     * Creates a tiny HTML with just the oriented image embedded as a data URI.
-     * This keeps the pipeline minimal while we verify orientation inside DomPDF.
+     * Turn a stored image (public disk or public path) into a DomPDF-safe, physically oriented JPG.
+     * Uses Intervention Image v3. Returns file:// URI or null if not found.
      */
-    public function overview(Request $request, Dog $dog)
+    private function imageToFileUriForPdf(?string $relOrPublicPath): ?string
     {
-        $rel = $dog->photo ?? $dog->photo_path ?? null;
-        if (!$rel || !Storage::disk('public')->exists($rel)) {
-            // If no photo, render a tiny PDF saying so
-            $html = '<!doctype html><html><body style="font-family:DejaVu Sans, Arial">
-                        <p>No photo found for this dog.</p>
-                     </body></html>';
-            return Pdf::loadHTML($html)
-                ->setPaper('a4', 'landscape')
-                ->setWarnings(false)
-                ->setOption('dpi', 96)
-                ->stream('Dog-'.$dog->id.'-Overview.pdf');
+        // Locate original absolute path
+        $abs = null;
+        if ($relOrPublicPath) {
+            if (Storage::disk('public')->exists($relOrPublicPath)) {
+                $abs = Storage::disk('public')->path($relOrPublicPath);
+            } elseif (is_file(public_path($relOrPublicPath))) {
+                $abs = public_path($relOrPublicPath);
+            }
         }
+        if (!$abs || !is_file($abs)) return null;
 
-        $abs = Storage::disk('public')->path($rel);
-
-        $manager = new ImageManager(Driver::class);
+        // Prepare cache target
+        $cacheDir = storage_path('app/public/pdf-cache');
+        if (!is_dir($cacheDir)) @mkdir($cacheDir, 0775, true);
+        $out = $cacheDir . '/dog-photo-' . Str::random(10) . '.jpg';
 
         try {
-            $img = $manager->read($abs)->orient(); // ← core fix
+            // Intervention Image v3 manager (GD)
+            // autoOrientation is enabled by default, but we'll be explicit with ->orient()
+            $manager = new ImageManager(Driver::class);
 
-            // keep it reasonable for PDF and strip EXIF by re-encoding
+            // Read + orient according to EXIF
+            $img = $manager->read($abs)->orient();
+
+            // Keep size reasonable for PDF, preserve aspect ratio
+            // v3 API: scaleDown() with width keeps aspect ratio automatically
             $img->scaleDown(width: 1600);
 
-            // Use data URI so we avoid file:// headaches during this test
-            $dataUri = $img->toJpeg(quality: 85)->toDataUri();
+            // Encode as JPEG (strips EXIF) and save
+            $img->toJpeg(quality: 85)->save($out);
 
-            $html = <<<HTML
-<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <style>
-    @page { size: A4 landscape; margin: 8mm; }
-    body { font-family: DejaVu Sans, Arial, Helvetica, sans-serif; }
-    img  { display:block; max-width:100%; height:auto; }
-  </style>
-</head>
-<body>
-  <div style="text-align:center;">
-    <img src="{$dataUri}" alt="Dog Photo">
-  </div>
-</body>
-</html>
-HTML;
-
-            return Pdf::loadHTML($html)
-                ->setPaper('a4', 'landscape')
-                ->setWarnings(false)
-                ->setOption('dpi', 96)
-                ->setOption('isRemoteEnabled', true)
-                ->stream('Dog-'.$dog->id.'-Overview.pdf');
-
+            return 'file://' . $out;
         } catch (\Throwable $e) {
-            $fallback = '<!doctype html><html><body style="font-family:DejaVu Sans, Arial">
-                           <p>Failed to read/orient image: '.e($e->getMessage()).'</p>
-                         </body></html>';
-            return Pdf::loadHTML($fallback)
-                ->setPaper('a4', 'landscape')
-                ->setWarnings(false)
-                ->setOption('dpi', 96)
-                ->stream('Dog-'.$dog->id.'-Overview.pdf');
+            // Fallback: copy as-is so at least something renders
+            @copy($abs, $out);
+            return 'file://' . $out;
         }
     }
 }
