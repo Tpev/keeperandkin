@@ -19,9 +19,11 @@
       .kk-toolbar { border:1px solid var(--kk-divider); background:#fff; }
       .kk-toolbar label { font-size:.75rem; color: color-mix(in oklab, var(--kk-navy) 70%, #000 0%); }
       .kk-toolbar input, .kk-toolbar select {
-        border:1px solid var(--kk-divider); background:#fff; color:var(--kk-navy); padding:.5rem .6rem; font-size:.875rem;
+        border:1px solid var(--kk-divider); background:#fff; color:var(--kk-navy);
+        padding:.5rem .6rem; font-size:.875rem;
       }
 
+      /* ---- TABLE + CELLS ---- */
       .kk-table .ts-table{ border:1px solid var(--kk-divider); overflow: clip; }
       .kk-table thead th{
         background: var(--kk-blue-alt) !important;
@@ -33,14 +35,29 @@
       .kk-table tbody tr:hover{ background: rgba(218,238,255,.45); }
       .kk-table tbody td{ color: var(--kk-navy); }
 
+      /* Allow dropdown to overflow properly */
+      .kk-table td { overflow: visible !important; }
+
+      /* ---- FIX TEAM SELECT ARROW OVERLAP ---- */
+      .kk-table select {
+          padding-right: 2rem !important;  /* Space for native arrow */
+          min-width: 160px !important;      /* Ensure text doesn't push arrow */
+          background-position: right .5rem center;
+          position: relative;
+          z-index: 5;
+      }
+
+      /* ---- DOG DISPLAY ---- */
       .kk-avatar{ width: 48px; height: 48px; object-fit: cover; border: 2px solid var(--kk-blue-alt); }
       .kk-name{ font-weight: 800; letter-spacing:.2px; }
       .kk-breed{ opacity:.8; font-size:.85rem; }
 
+      /* ---- SCORE BADGES ---- */
       .kk-score{
         display:inline-flex; align-items:center; justify-content:center;
         font-size:.8rem; font-weight:700; padding:.25rem .5rem;
-        border:1px solid var(--kk-divider); background:#fff; color: var(--kk-scale-ok);
+        border:1px solid var(--kk-divider); background:#fff;
+        color: var(--kk-scale-ok);
         min-width: 2.25rem; text-align:center;
       }
       .kk-score--red    { color: var(--kk-scale-red);    border-color: var(--kk-scale-red); }
@@ -58,6 +75,7 @@
       }
       .kk-flag-none{ border-color: var(--kk-divider); color:#374151; }
 
+      /* ---- BUTTONS ---- */
       .kk-btn {
         display:inline-flex; align-items:center; gap:.35rem;
         padding:.4rem .6rem; font-size:.8125rem; font-weight:700;
@@ -70,20 +88,20 @@
     </style>
     @endpush
 
+
     <div class="kk-table">
 
-        {{-- Toolbar --}}
+        {{-- Toolbar – FRONT-END ONLY --}}
         <div class="kk-toolbar p-3 mb-3">
             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
                 <div class="lg:col-span-2">
                     <label class="block mb-1">Search</label>
-                    <input type="text" placeholder="Name, breed, serial…"
-                           wire:model.debounce.400ms="q" />
+                    <input id="dog-search" type="text" placeholder="Name, breed, serial…" />
                 </div>
 
                 <div>
                     <label class="block mb-1">Sex</label>
-                    <select wire:model="sex">
+                    <select id="dog-sex">
                         <option value="">Any</option>
                         <option value="male">Male</option>
                         <option value="female">Female</option>
@@ -92,22 +110,19 @@
 
                 <div>
                     <label class="block mb-1">Flags</label>
-                    <select wire:model="flags">
+                    <select id="dog-flags">
                         <option value="">Any</option>
                         <option value="with">With red flags</option>
                         <option value="none">No red flags</option>
                     </select>
                 </div>
 
-                <div>
-                    <label class="block mb-1">Min. Score</label>
-                    <input type="number" min="0" max="100" step="1" wire:model.lazy="scoreMin" placeholder="e.g., 70" />
-                </div>
+                <div></div>
 
                 <div class="flex items-end">
-                    <button type="button" wire:click="resetFilters"
-                            class="kk-btn" title="Reset filters">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <button type="button" id="dog-reset-filters" class="kk-btn">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none"
+                             viewBox="0 0 24 24" stroke="currentColor">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                   d="M4 4v6h6M20 20v-6h-6M5.636 18.364A9 9 0 1118.364 5.636"/>
                         </svg>
@@ -117,24 +132,24 @@
             </div>
         </div>
 
+        {{-- TABLE --}}
         <x-ts-table
             :$headers
             :$rows
-            link="{{ url('/dogs/{id}') }}"  {{-- row click-through --}}
+            link="{{ url('/dogs/{id}') }}"
             hover
             paginate
             id="dogs"
         >
-            {{-- DOG --}}
             @interact('column_name', $row)
                 @php
-                    $dogName  = $row->name ?? ($row['name'] ?? 'Unnamed');
-                    $breed    = $row->breed ?? ($row['breed'] ?? 'Mixed');
-                    $photo    = $row->photo ?? ($row->photo_path ?? null);
+                    $dogName  = $row->name ?? 'Unnamed';
+                    $breed    = $row->breed ?? 'Mixed';
+                    $photo    = $row->photo ?? $row->photo_path ?? null;
                     $photoUrl = $photo ? asset('storage/'.$photo) : 'https://placehold.co/96x96?text=Dog';
                 @endphp
                 <div class="flex items-center gap-3">
-                    <img src="{{ $photoUrl }}" alt="Photo of {{ $dogName }}" class="kk-avatar" loading="lazy">
+                    <img src="{{ $photoUrl }}" class="kk-avatar" loading="lazy">
                     <div>
                         <div class="kk-name">{{ $dogName }}</div>
                         <div class="kk-breed">{{ $breed }}</div>
@@ -142,168 +157,143 @@
                 </div>
             @endinteract
 
-            {{-- AGE --}}
             @interact('column_age', $row)
                 {{ $row->age ?? '—' }}
             @endinteract
 
-            {{-- SEX --}}
             @interact('column_sex', $row)
-                {{ isset($row->sex) ? \Illuminate\Support\Str::ucfirst($row->sex) : '—' }}
+                {{ ucfirst($row->sex ?? '—') }}
             @endinteract
 
-            {{-- SCORES (C/S/T) --}}
             @interact('column_score', $row)
                 @php
-                    $ev = $row->latestEvaluation ?? ($row['latestEvaluation'] ?? null);
+                    $ev = $row->latestEvaluation;
 
-                    $toArray = function ($maybe) {
-                        if (is_array($maybe)) return $maybe;
-                        if (is_object($maybe)) return get_object_vars($maybe);
-                        return [];
-                    };
+                    $scores = $ev?->category_scores ?? [];
 
-                    $raw   = $ev->category_scores ?? ($ev['category_scores'] ?? null);
-                    $byCat = $toArray($raw);
+                    $c = $scores['Comfort & Confidence'] ?? $scores['Confidence'] ?? null;
+                    $s = $scores['Sociability'] ?? null;
+                    $t = $scores['Trainability'] ?? null;
 
-                    $pick = function(array $a, array $keys, $fallback = null) {
-                        foreach ($keys as $k) {
-                            if (array_key_exists($k, $a) && $a[$k] !== null && $a[$k] !== '') {
-                                return (int) $a[$k];
-                            }
-                        }
-                        return $fallback;
-                    };
+                    $norm = fn($v)=> is_numeric($v)?max(0,min(100,$v)):null;
 
-                    $c = $pick($byCat, ['Comfort & Confidence','Confidence','comfort_confidence'], null);
-                    $s = $pick($byCat, ['Sociability','Social','sociability'], null);
-                    $t = $pick($byCat, ['Trainability','trainability'], null);
+                    $c=$norm($c); $s=$norm($s); $t=$norm($t);
 
-                    $norm = function ($v) { if (!is_numeric($v)) return null; $v=(int)$v; return max(0,min(100,$v)); };
-                    $c = $norm($c); $s = $norm($s); $t = $norm($t);
-
-                    $classFor = function ($v) {
-                        if ($v === null) return '';
-                        if ($v <= 25)  return 'kk-score--red';
-                        if ($v <= 50)  return 'kk-score--orange';
-                        if ($v <= 75)  return 'kk-score--yellow';
-                        return 'kk-score--green';
-                    };
+                    $class = fn($v)=>$v===null?'':(
+                        $v<=25?'kk-score--red':($v<=50?'kk-score--orange':($v<=75?'kk-score--yellow':'kk-score--green'))
+                    );
                 @endphp
-
-                <div class="kk-scores-3" title="Comfort / Sociability / Trainability">
+                <div class="kk-scores-3">
                     <span class="kk-score-label">C</span>
-                    <span class="kk-score {{ $classFor($c) }}" title="Comfort & Confidence">{{ $c === null ? '—' : $c }}</span>
-
+                    <span class="kk-score {{ $class($c) }}">{{ $c ?? '—' }}</span>
                     <span class="kk-score-label">S</span>
-                    <span class="kk-score {{ $classFor($s) }}" title="Sociability">{{ $s === null ? '—' : $s }}</span>
-
+                    <span class="kk-score {{ $class($s) }}">{{ $s ?? '—' }}</span>
                     <span class="kk-score-label">T</span>
-                    <span class="kk-score {{ $classFor($t) }}" title="Trainability">{{ $t === null ? '—' : $t }}</span>
+                    <span class="kk-score {{ $class($t) }}">{{ $t ?? '—' }}</span>
                 </div>
             @endinteract
 
-            {{-- TEAM (Admins only) --}}
             @interact('column_team', $row)
                 @php
-                    $isAdminLocal = (auth()->user()->is_admin ?? false) ? true : false;
-                    $currentId    = (int) ($row->team_id ?? 0);
-                    $teamsList    = $isAdminLocal
-                        ? \App\Models\Team::query()->select('id','name')->orderBy('name')->get()
+                    $isAdminLocal = auth()->user()->is_admin ?? false;
+                    $current = $row->team_id;
+                    $teams = $isAdminLocal
+                        ? \App\Models\Team::select('id','name')->orderBy('name')->get()
                         : collect();
-                    $currentName  = $row->team->name ?? ($teamsList->firstWhere('id', $currentId)->name ?? '—');
                 @endphp
 
                 @if($isAdminLocal)
-                    <div
-                        x-data
-                        @click.stop
-                        @mousedown.stop
-                        @mouseup.stop
-                        @keydown.stop
-                        @focus.stop
-                        @change.stop
-                        onclick="event.stopPropagation()"
-                        onmousedown="event.stopPropagation()"
-                        onmouseup="event.stopPropagation()"
-                        onkeydown="event.stopPropagation()"
-                        onfocus="event.stopPropagation()"
-                        onchange="event.stopPropagation()"
-                    >
-                        <label class="sr-only" for="team-{{ $row->id }}">Team</label>
-                        <select id="team-{{ $row->id }}"
-                                class="border px-2 py-1"
-                                wire:change="updateTeam({{ $row->id }}, $event.target.value)"
-                                @click.stop
-                                @mousedown.stop
-                                @mouseup.stop
-                                @keydown.stop
-                                @focus.stop
-                                @change.stop
-                                onclick="event.stopPropagation()"
-                                onmousedown="event.stopPropagation()"
-                                onmouseup="event.stopPropagation()"
-                                onkeydown="event.stopPropagation()"
-                                onfocus="event.stopPropagation()"
-                                onchange="event.stopPropagation()"
+                    <div x-data @click.stop>
+                        <select
+                            class="border px-2 py-1 w-full"
+                            wire:change="updateTeam({{ $row->id }}, $event.target.value)"
+                            @click.stop
                         >
-                            @foreach($teamsList as $t)
-                                <option value="{{ $t->id }}" @selected($t->id === $currentId)>{{ $t->name }}</option>
+                            @foreach($teams as $t)
+                                <option value="{{ $t->id }}" @selected($t->id == $current)>
+                                    {{ $t->name }}
+                                </option>
                             @endforeach
                         </select>
                     </div>
                 @else
-                    {{ $currentName }}
+                    {{ $row->team->name ?? '—' }}
                 @endif
             @endinteract
 
-            {{-- FLAG --}}
             @interact('column_flag', $row)
                 @php
-                    $ev    = $row->latestEvaluation ?? null;
-                    $flags = $ev?->red_flags ?? [];
-                    if (is_object($flags)) $flags = get_object_vars($flags);
-                    if (!is_array($flags)) $flags = [];
-                    $count = count($flags);
+                    $flags = $row->latestEvaluation?->red_flags ?? [];
+                    $flags = is_object($flags) ? get_object_vars($flags) : $flags;
                 @endphp
 
-                @if($count > 0)
-                    @php
-                        $pretty = \Illuminate\Support\Str::headline($flags[0]);
-                        $title  = implode(', ', array_map(fn($f) => \Illuminate\Support\Str::headline($f), $flags));
-                    @endphp
-                    <span class="kk-flag" title="{{ $title }}">
-                        {{ $pretty }}@if($count > 1) <span class="ml-1 opacity-90">+{{ $count - 1 }}</span>@endif
+                @if(count($flags))
+                    <span class="kk-flag">
+                        {{ \Illuminate\Support\Str::headline($flags[0]) }}
+                        @if(count($flags)>1)
+                            +{{ count($flags)-1 }}
+                        @endif
                     </span>
                 @else
-                    <span class="kk-flag kk-flag-none" title="No red flags">No red flags</span>
+                    <span class="kk-flag kk-flag-none">No red flags</span>
                 @endif
             @endinteract
 
-            {{-- ACTIONS --}}
             @interact('column_action', $row)
                 <div class="flex items-center gap-2">
-                    <a class="kk-btn" href="{{ route('dogs.show', $row) }}" title="View">
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
-                             stroke="currentColor" stroke-width="2">
-                            <path stroke-linecap="round" stroke-linejoin="round"
-                                  d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
-                            <path stroke-linecap="round" stroke-linejoin="round"
-                                  d="M2.458 12C3.732 7.943 7.523 5 12 5s8.268 2.943 9.542 7c-1.274 4.057-5.065 7-9.542 7s-8.268-2.943-9.542-7z"/>
-                        </svg>
-                        View
-                    </a>
-                    <a class="kk-btn kk-btn--primary" href="{{ route('dogs.edit', $row) }}" title="Edit">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"
-                             stroke="currentColor" stroke-width="2">
-                            <path stroke-linecap="round" stroke-linejoin="round"
-                                  d="M15.232 5.232l3.536 3.536M4 20h4l10.5-10.5a2.5 2.5 0 10-3.536-3.536L4 16v4z"/>
-                        </svg>
-                        Edit
-                    </a>
+                    <a class="kk-btn" href="{{ route('dogs.show', $row) }}">View</a>
+                    <a class="kk-btn kk-btn--primary" href="{{ route('dogs.edit', $row) }}">Edit</a>
                 </div>
             @endinteract
-
         </x-ts-table>
     </div>
+
+    {{-- FE FILTER SCRIPT --}}
+    <script>
+        (function () {
+            function applyFilters() {
+                const search = document.getElementById('dog-search').value.toLowerCase();
+                const sex = document.getElementById('dog-sex').value;
+                const flags = document.getElementById('dog-flags').value;
+
+                const rows = document.querySelectorAll('.kk-table table tbody tr');
+
+                rows.forEach(row => {
+                    const text = row.textContent.toLowerCase();
+                    const sexText = row.children[2]?.textContent.trim().toLowerCase() || '';
+                    const flagText = row.children[5]?.textContent.trim().toLowerCase() || '';
+
+                    let ok = true;
+
+                    if (search && !text.includes(search)) ok = false;
+
+                    if (sex === 'male' && sexText !== 'male') ok = false;
+                    if (sex === 'female' && sexText !== 'female') ok = false;
+
+                    if (flags === 'with' && flagText.includes('no red flags')) ok = false;
+                    if (flags === 'none' && !flagText.includes('no red flags')) ok = false;
+
+                    row.style.display = ok ? '' : 'none';
+                });
+            }
+
+            function init() {
+                document.getElementById('dog-search').addEventListener('input', applyFilters);
+                document.getElementById('dog-sex').addEventListener('change', applyFilters);
+                document.getElementById('dog-flags').addEventListener('change', applyFilters);
+
+                document.getElementById('dog-reset-filters').addEventListener('click', () => {
+                    document.getElementById('dog-search').value = '';
+                    document.getElementById('dog-sex').value = '';
+                    document.getElementById('dog-flags').value = '';
+                    applyFilters();
+                });
+
+                applyFilters();
+            }
+
+            document.addEventListener('DOMContentLoaded', init);
+            if (window.Livewire) Livewire.hook('message.processed', init);
+        })();
+    </script>
 </div>

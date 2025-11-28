@@ -1,5 +1,5 @@
 {{-- resources/views/dogs/show-upgraded.blade.php --}}
-{{-- Keeper & Kin – Dog Profile (3 Tabs: Overview, Training, Health) --}}
+{{-- Keeper & Kin – Dog Profile (4 Tabs: Overview, Training, Gallery, Health) --}}
 
 @push('styles')
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -40,11 +40,12 @@
 
     $latestEval = $dog->latestEvaluation ?? null;
 
-    // Active tab via ?tab=overview|training|health
+    // Active tab via ?tab=overview|training|gallery|health
     $activeTabKey = request('tab', 'overview');
     $tabMap = [
         'overview' => 'Overview',
         'training' => 'Training',
+        'gallery'  => 'Gallery',
         'health'   => 'Health',
     ];
     $activeTabLabel = $tabMap[$activeTabKey] ?? 'Overview';
@@ -189,8 +190,15 @@
     <div class="sticky top-0 z-30 border-b bg-white/90 backdrop-blur" style="border-color: {{ $KK_DIVIDER }};">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2">
 
-            {{-- Only 3 tabs now --}}
-            <script>window.__kkTabMap = { Overview:'overview', Training:'training', Health:'health' };</script>
+            {{-- 4 tabs now --}}
+            <script>
+                window.__kkTabMap = {
+                    Overview: 'overview',
+                    Training: 'training',
+                    Gallery: 'gallery',
+                    Health: 'health',
+                };
+            </script>
 
             <x-ts-tab :selected="$activeTabLabel" x-on:navigate="
                 (e) => {
@@ -208,17 +216,25 @@
                     {{-- Profile section --}}
                     <section class="max-w-7xl mx-auto p-8 md:p-12 border mt-4"
                              style="background: rgba(255,255,255,0.9); border-color: {{ $KK_DIVIDER }};">
-                        <div class="flex flex-col md:flex-row gap-10">
-                            <img src="{{ $photoUrl }}" alt="{{ $name }}"
-                                 class="w-40 h-40 md:w-56 md:h-56 object-cover border"
-                                 style="border-color: {{ $KK_BLUE_ALT }};" loading="lazy">
 
-                            <div class="flex-1 space-y-4">
+                        {{-- HERO: 2 columns -> left = photo, right = identity/info --}}
+                        <div class="flex flex-col md:flex-row gap-10 items-start">
+                            {{-- Left: Photo --}}
+                            <div class="md:w-1/2 flex justify-center md:justify-start">
+                                <img src="{{ $photoUrl }}" alt="{{ $name }}"
+                                     class="w-48 h-48 md:w-72 md:h-72 object-cover border"
+                                     style="border-color: {{ $KK_BLUE_ALT }};" loading="lazy">
+                            </div>
+
+                            {{-- Right: Name + meta + red flags --}}
+                            <div class="md:w-1/2 space-y-3">
                                 <div class="space-y-2">
-                                    <h1 class="text-4xl font-extrabold flex items-center gap-3">
-                                        {{ $name }}
+                                    <h1 class="text-4xl font-extrabold flex flex-wrap items-baseline gap-3">
+                                        <span>{{ $name }}</span>
                                         <span class="text-xs font-mono px-2 py-0.5 border"
-                                              style="background: {{ $KK_BLUE_ALT }}; color: {{ $KK_BLUE }}; border-color: {{ $KK_DIVIDER }};">{{ $uid }}</span>
+                                              style="background: {{ $KK_BLUE_ALT }}; color: {{ $KK_BLUE }}; border-color: {{ $KK_DIVIDER }};">
+                                            {{ $uid }}
+                                        </span>
                                     </h1>
 
                                     @if ($dog->serial_number)
@@ -230,179 +246,205 @@
                                         </p>
                                     @endif
 
-                                    <p class="text-sm uppercase tracking-wide font-semibold flex items-center gap-2" style="color: {{ $KK_NAVY }}CC">
+                                    <p class="text-sm uppercase tracking-wide font-semibold flex items-center gap-2"
+                                       style="color: {{ $KK_NAVY }}CC">
                                         {!! $tileIcons['trainability'] !!} {{ $breed }} · {{ $sex }} · {{ $age }}
                                     </p>
 
                                     <p class="text-sm leading-5">
-                                        <span class="font-medium">Intake:</span> {{ \Carbon\Carbon::parse($intakeDate)->format('M d, Y') }} ·
+                                        <span class="font-medium">Intake:</span>
+                                        {{ \Carbon\Carbon::parse($intakeDate)->format('M d, Y') }} ·
                                         <span class="font-medium">Status:</span>
                                         <span class="inline-block px-2 py-0.5 border"
-                                              style="background:#DEF7EC; color:#03543F; border-color:#C7F3E3;">{{ $status }}</span>
+                                              style="background:#DEF7EC; color:#03543F; border-color:#C7F3E3;">
+                                            {{ $status }}
+                                        </span>
                                     </p>
+                                </div>
 
+                                @php
+                                    $latestEval = $latestEval ?? ($dog->latestEvaluation ?? null);
+                                    $redFlags   = is_array($latestEval?->red_flags ?? null) ? $latestEval->red_flags : [];
+                                @endphp
+
+                                <div class="flex flex-wrap gap-2 mt-1">
+                                    @forelse ($redFlags as $flag)
+                                        <span class="inline-block text-xs font-semibold px-3 py-1 border"
+                                              style="background: {{ $KK_DANGER }}; color: white; border-color: {{ $KK_DANGER }};">
+                                            {{ \Illuminate\Support\Str::headline($flag) }}
+                                        </span>
+                                    @empty
+                                        <span class="inline-block text-xs px-3 py-1 border"
+                                              style="background:#F8FAFC; color:#374151; border-color: {{ $KK_DIVIDER }};">
+                                            No red flags
+                                        </span>
+                                    @endforelse
+                                </div>
+                            </div>
+                        </div>
+
+                        {{-- Everything else under hero --}}
+                        <div class="mt-8 space-y-6">
+                            {{-- Profile details --}}
+                            <div class="border" style="border-color: {{ $KK_DIVIDER }};">
+                                <div class="px-4 py-3" style="background: {{ $KK_BLUE_ALT }};">
+                                    <h2 class="text-lg font-bold">Profile</h2>
+                                </div>
+                                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
                                     @php
-                                        $latestEval = $latestEval ?? ($dog->latestEvaluation ?? null);
-                                        $redFlags   = is_array($latestEval?->red_flags ?? null) ? $latestEval->red_flags : [];
+                                        $row = function($label, $value) use ($KK_DIVIDER, $KK_NAVY) {
+                                            $val = filled($value) ? e($value) : '—';
+                                            return <<<HTML
+                                                <div class="flex flex-col border-t" style="border-color: {$KK_DIVIDER};">
+                                                    <div class="px-4 pt-3 text-xs uppercase tracking-wide font-semibold" style="color: {$KK_NAVY}B3">{$label}</div>
+                                                    <div class="px-4 pb-3 text-sm">{$val}</div>
+                                                </div>
+                                            HTML;
+                                        };
                                     @endphp
 
-                                    <div class="flex flex-wrap gap-2 mt-3">
-                                        @forelse ($redFlags as $flag)
-                                            <span class="inline-block text-xs font-semibold px-3 py-1 border"
-                                                  style="background: {{ $KK_DANGER }}; color: white; border-color: {{ $KK_DANGER }};">
-                                                {{ \Illuminate\Support\Str::headline($flag) }}
+                                    {!! $row('Location', $dog->location) !!}
+                                    {!! $row('Approx. Date of Birth', $approxDobUs) !!}
+                                    {!! $row('Altered', $fixedHuman) !!}
+                                    {!! $row('Color', $dog->color) !!}
+                                    {!! $row('Size', $dog->size) !!}
+                                    {!! $row('Microchip', $dog->microchip) !!}
+                                    {!! $row('Heartworm', $dog->heartworm) !!}
+                                    {!! $row('FIV/L', $dog->fiv_l) !!}
+                                    {!! $row('FLV', $dog->flv) !!}
+                                    {!! $row('Housetrained?', $dog->housetrained) !!}
+                                    {!! $row('Good with Dogs?', $dog->good_with_dogs) !!}
+                                    {!! $row('Good with Cats?', $dog->good_with_cats) !!}
+                                    {!! $row('Good with Children?', $dog->good_with_children) !!}
+                                </div>
+                            </div>
+
+                            {{-- Scorecard --}}
+                            <div class="border" style="border-color: {{ $KK_DIVIDER }};">
+                                <div class="px-4 py-3" style="background: {{ $KK_BLUE_ALT }};">
+                                    <div class="flex items-center justify-between">
+                                        <h2 class="text-lg font-bold">Scorecard</h2>
+                                        <div class="hidden sm:flex items-center gap-3 text-xs">
+                                            <span class="inline-flex items-center gap-1">
+                                                <span class="inline-block w-3 h-3 border" style="background: {{ $SCALE_RED }}; border-color: {{ $SCALE_RED }}"></span>
+                                                Red (0–25)
                                             </span>
-                                        @empty
-                                            <span class="inline-block text-xs px-3 py-1 border"
-                                                  style="background:#F8FAFC; color:#374151; border-color: {{ $KK_DIVIDER }};">No red flags</span>
-                                        @endforelse
-                                    </div>
-                                </div>
-
-                                {{-- Profile details --}}
-                                <div class="mt-6 border" style="border-color: {{ $KK_DIVIDER }};">
-                                    <div class="px-4 py-3" style="background: {{ $KK_BLUE_ALT }};">
-                                        <h2 class="text-lg font-bold">Profile</h2>
-                                    </div>
-                                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
-                                        @php
-                                            $row = function($label, $value) use ($KK_DIVIDER, $KK_NAVY) {
-                                                $val = filled($value) ? e($value) : '—';
-                                                return <<<HTML
-                                                    <div class="flex flex-col border-t" style="border-color: {$KK_DIVIDER};">
-                                                        <div class="px-4 pt-3 text-xs uppercase tracking-wide font-semibold" style="color: {$KK_NAVY}B3">{$label}</div>
-                                                        <div class="px-4 pb-3 text-sm">{$val}</div>
-                                                    </div>
-                                                HTML;
-                                            };
-                                        @endphp
-
-                                        {!! $row('Location', $dog->location) !!}
-                                        {!! $row('Approx. Date of Birth', $approxDobUs) !!}
-                                        {!! $row('Altered', $fixedHuman) !!}
-                                        {!! $row('Color', $dog->color) !!}
-                                        {!! $row('Size', $dog->size) !!}
-                                        {!! $row('Microchip', $dog->microchip) !!}
-                                        {!! $row('Heartworm', $dog->heartworm) !!}
-                                        {!! $row('FIV/L', $dog->fiv_l) !!}
-                                        {!! $row('FLV', $dog->flv) !!}
-                                        {!! $row('Housetrained?', $dog->housetrained) !!}
-                                        {!! $row('Good with Dogs?', $dog->good_with_dogs) !!}
-                                        {!! $row('Good with Cats?', $dog->good_with_cats) !!}
-                                        {!! $row('Good with Children?', $dog->good_with_children) !!}
-                                    </div>
-                                </div>
-
-                                {{-- Scorecard --}}
-                                <div class="mt-6 border" style="border-color: {{ $KK_DIVIDER }};">
-                                    <div class="px-4 py-3" style="background: {{ $KK_BLUE_ALT }};">
-                                        <div class="flex items-center justify-between">
-                                            <h2 class="text-lg font-bold">Scorecard</h2>
-                                            <div class="hidden sm:flex items-center gap-3 text-xs">
-                                                <span class="inline-flex items-center gap-1"><span class="inline-block w-3 h-3 border" style="background: {{ $SCALE_RED }}; border-color: {{ $SCALE_RED }}"></span> Red (0–25)</span>
-                                                <span class="inline-flex items-center gap-1"><span class="inline-block w-3 h-3 border" style="background: {{ $SCALE_ORANGE }}; border-color: {{ $SCALE_ORANGE }}"></span> Orange (26–50)</span>
-                                                <span class="inline-flex items-center gap-1"><span class="inline-block w-3 h-3 border" style="background: {{ $SCALE_YELLOW }}; border-color: {{ $SCALE_YELLOW }}"></span> Yellow (51–75)</span>
-                                                <span class="inline-flex items-center gap-1"><span class="inline-block w-3 h-3 border" style="background: {{ $SCALE_GREEN }}; border-color: {{ $SCALE_GREEN }}"></span> Green (76–100)</span>
-                                            </div>
+                                            <span class="inline-flex items-center gap-1">
+                                                <span class="inline-block w-3 h-3 border" style="background: {{ $SCALE_ORANGE }}; border-color: {{ $SCALE_ORANGE }}"></span>
+                                                Orange (26–50)
+                                            </span>
+                                            <span class="inline-flex items-center gap-1">
+                                                <span class="inline-block w-3 h-3 border" style="background: {{ $SCALE_YELLOW }}; border-color: {{ $SCALE_YELLOW }}"></span>
+                                                Yellow (51–75)
+                                            </span>
+                                            <span class="inline-flex items-center gap-1">
+                                                <span class="inline-block w-3 h-3 border" style="background: {{ $SCALE_GREEN }}; border-color: {{ $SCALE_GREEN }}"></span>
+                                                Green (76–100)
+                                            </span>
                                         </div>
                                     </div>
+                                </div>
 
-                                    <div class="grid gap-0 sm:grid-cols-3">
-                                        @foreach($categories as $lbl=>$valx)
-                                            @php
-                                                $key    = Str::slug($lbl);
-                                                $icon   = $tileIcons[$key] ?? '';
-                                                $barClr = $barColor($valx);
-                                                $width  = $barWidth($valx);
-                                                $text   = is_numeric($valx) ? ($valx.' / 100') : '—';
-                                            @endphp
-                                            <div class="p-4 border-t sm:border-l" style="border-color: {{ $KK_DIVIDER }}; background: #fff;">
-                                                <p class="text-sm font-semibold flex items-center gap-2" style="color: {{ $KK_NAVY }}">
-                                                    {!! $icon !!} {{ $lbl }}
-                                                </p>
-                                                <div class="h-3 w-full overflow-hidden mt-2 border" style="background: {{ $KK_DIVIDER }}; border-color: {{ $KK_DIVIDER }};">
-                                                    <div class="h-full" style="background: {{ $barClr }}; width: {{ $width }}%"></div>
-                                                </div>
-                                                <p class="text-right mt-1 text-sm font-medium" style="color:{{ $barClr }}">{{ $text }}</p>
+                                <div class="grid gap-0 sm:grid-cols-3">
+                                    @foreach($categories as $lbl=>$valx)
+                                        @php
+                                            $key    = Str::slug($lbl);
+                                            $icon   = $tileIcons[$key] ?? '';
+                                            $barClr = $barColor($valx);
+                                            $width  = $barWidth($valx);
+                                            $text   = is_numeric($valx) ? ($valx.' / 100') : '—';
+                                        @endphp
+                                        <div class="p-4 border-t sm:border-l" style="border-color: {{ $KK_DIVIDER }}; background: #fff;">
+                                            <p class="text-sm font-semibold flex items-center gap-2" style="color: {{ $KK_NAVY }}">
+                                                {!! $icon !!} {{ $lbl }}
+                                            </p>
+                                            <div class="h-3 w-full overflow-hidden mt-2 border" style="background: {{ $KK_DIVIDER }}; border-color: {{ $KK_DIVIDER }};">
+                                                <div class="h-full" style="background: {{ $barClr }}; width: {{ $width }}%"></div>
                                             </div>
-                                        @endforeach
-                                    </div>
+                                            <p class="text-right mt-1 text-sm font-medium" style="color:{{ $barClr }}">{{ $text }}</p>
+                                        </div>
+                                    @endforeach
                                 </div>
 
-                                {{-- Simple Notes (dog description) --}}
-                                @if($dog->description)
-                                    <div class="mt-6 border p-4" style="border-color: {{ $KK_DIVIDER }}; background: #fff;">
-                                        <h3 class="text-base font-semibold mb-2">Notes</h3>
-                                        <p class="text-sm leading-6" style="color: {{ $KK_NAVY }}CC">{{ $dog->description }}</p>
-                                    </div>
-                                @endif
+                                
+                            </div>
+<livewire:dogs.adoptionchecklist :dog="$dog" :key="'training-'.$dog->id" />
+                            {{-- Simple Notes (dog description) --}}
+                            @if($dog->description)
+                                <div class="border p-4" style="border-color: {{ $KK_DIVIDER }}; background: #fff;">
+                                    <h3 class="text-base font-semibold mb-2">Notes</h3>
+                                    <p class="text-sm leading-6" style="color: {{ $KK_NAVY }}CC">{{ $dog->description }}</p>
+                                </div>
+                            @endif
 
-                                {{-- Care Team Notes (Livewire component) --}}
-                                <div class="mt-6 border" style="border-color: {{ $KK_DIVIDER }}; background:#fff;">
-                                    <div class="px-4 py-3 border-b" style="background: {{ $KK_BLUE_ALT }}; border-color: {{ $KK_DIVIDER }}">
-                                        <h2 class="text-lg font-bold">Care Team Notes</h2>
-                                    </div>
-                                    <div class="p-4">
-                                        <livewire:dogs.care-notes :dog="$dog" :key="'notes-'.$dog->id" />
-                                    </div>
+                            {{-- Care Team Notes (Livewire component) --}}
+                            <div class="border" style="border-color: {{ $KK_DIVIDER }}; background:#fff;">
+                                <div class="px-4 py-3 border-b" style="background: {{ $KK_BLUE_ALT }}; border-color: {{ $KK_DIVIDER }}">
+                                    <h2 class="text-lg font-bold">Care Team Notes</h2>
+                                </div>
+                                <div class="p-4">
+                                    <livewire:dogs.care-notes :dog="$dog" :key="'notes-'.$dog->id" />
+                                </div>
+                            </div>
+
+                            {{-- Evaluation History (aligned with other cards) --}}
+                            <div class="border" style="border-color: {{ $KK_DIVIDER }}; background:#fff;">
+                                <div class="px-4 py-3 border-b" style="background: {{ $KK_BLUE_ALT }}; border-color: {{ $KK_DIVIDER }}">
+                                    <h2 class="text-lg font-bold">Evaluation History</h2>
                                 </div>
 
+                                <div class="p-4">
+                                    @if ($history->isEmpty())
+                                        <p class="text-sm" style="color: {{ $KK_NAVY }}B3">
+                                            No evaluations yet.
+                                        </p>
+                                    @else
+                                        <div class="overflow-x-auto border" style="border-color: {{ $KK_DIVIDER }};">
+                                            <table class="min-w-full text-sm divide-y" style="background: #fff; border-color: {{ $KK_DIVIDER }};">
+                                                <thead style="background: {{ $KK_BLUE_ALT }};">
+                                                    <tr>
+                                                        <th class="py-2 px-3 text-left">Date</th>
+                                                        <th class="py-2 px-3 text-left">{{ $LABEL_CC }}</th>
+                                                        <th class="py-2 px-3 text-left">{{ $LABEL_SO }}</th>
+                                                        <th class="py-2 px-3 text-left">{{ $LABEL_TR }}</th>
+                                                        <th class="py-2 px-3 text-left">Action</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody class="divide-y" style="border-color: {{ $KK_DIVIDER }};">
+                                                    @foreach($history as $row)
+                                                        @php
+                                                            $date = \Carbon\Carbon::parse($row['date'] ?? now());
+                                                            $ccH  = (int) ($row['cc'] ?? 0);
+                                                            $soH  = (int) ($row['so'] ?? 0);
+                                                            $trH  = (int) ($row['tr'] ?? 0);
+                                                            $eid  = (int) ($row['id'] ?? 0);
+                                                        @endphp
+                                                        <tr>
+                                                            <td class="py-2 px-3 font-medium">{{ $date->format('M d, Y') }}</td>
+                                                            <td class="py-2 px-3">{{ $ccH }}</td>
+                                                            <td class="py-2 px-3">{{ $soH }}</td>
+                                                            <td class="py-2 px-3">{{ $trH }}</td>
+                                                            <td class="py-2 px-3">
+                                                                <a  class="inline-flex items-center gap-1 px-2 py-1 border text-sm"
+                                                                    style="color:#076BA8; border-color:#076BA8;"
+                                                                    href="{{ route('dogs.evaluations.show', ['dog' => $dog, 'evaluation' => $eid]) }}"
+                                                                    target="_blank" rel="noopener">
+                                                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                                                        <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                                                                        <path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.477 0 8.268 2.943 9.542 7-1.274 4.057-5.065 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+                                                                    </svg>
+                                                                    Open
+                                                                </a>
+                                                            </td>
+                                                        </tr>
+                                                    @endforeach
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    @endif
+                                </div>
                             </div>
                         </div>
-                    </section>
-
-                    {{-- Full History (in Overview) --}}
-                    <section class="max-w-7xl mx-auto mt-8 border p-6" style="border-color: {{ $KK_DIVIDER }}; background:#fff;">
-                        <div class="mb-3 px-1 py-2" style="background: {{ $KK_BLUE_ALT }};">
-                            <h3 class="text-lg font-bold px-2">Evaluation History</h3>
-                        </div>
-
-                        @if ($history->isEmpty())
-                            <p class="text-sm" style="color: {{ $KK_NAVY }}B3">No evaluations yet.</p>
-                        @else
-                            <div class="overflow-x-auto border" style="border-color: {{ $KK_DIVIDER }};">
-                                <table class="min-w-full text-sm divide-y" style="background: #fff; border-color: {{ $KK_DIVIDER }};">
-                                    <thead style="background: {{ $KK_BLUE_ALT }};">
-                                        <tr>
-                                            <th class="py-2 px-3 text-left">Date</th>
-                                            <th class="py-2 px-3 text-left">{{ $LABEL_CC }}</th>
-                                            <th class="py-2 px-3 text-left">{{ $LABEL_SO }}</th>
-                                            <th class="py-2 px-3 text-left">{{ $LABEL_TR }}</th>
-                                            <th class="py-2 px-3 text-left">Action</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody class="divide-y" style="border-color: {{ $KK_DIVIDER }};">
-                                        @foreach($history as $row)
-                                            @php
-                                                $date = \Carbon\Carbon::parse($row['date'] ?? now());
-                                                $ccH  = (int) ($row['cc'] ?? 0);
-                                                $soH  = (int) ($row['so'] ?? 0);
-                                                $trH  = (int) ($row['tr'] ?? 0);
-                                                $eid  = (int) ($row['id'] ?? 0);
-                                            @endphp
-                        <tr>
-                            <td class="py-2 px-3 font-medium">{{ $date->format('M d, Y') }}</td>
-                            <td class="py-2 px-3">{{ $ccH }}</td>
-                            <td class="py-2 px-3">{{ $soH }}</td>
-                            <td class="py-2 px-3">{{ $trH }}</td>
-                            <td class="py-2 px-3">
-                                <a  class="inline-flex items-center gap-1 px-2 py-1 border text-sm"
-                                    style="color:#076BA8; border-color:#076BA8;"
-                                    href="{{ route('dogs.evaluations.show', ['dog' => $dog, 'evaluation' => $eid]) }}"
-                                    target="_blank" rel="noopener">
-                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                        <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
-                                        <path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.477 0 8.268 2.943 9.542 7-1.274 4.057-5.065 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
-                                    </svg>
-                                    Open
-                                </a>
-                            </td>
-                        </tr>
-                                        @endforeach
-                                    </tbody>
-                                </table>
-                            </div>
-                        @endif
                     </section>
                 </x-ts-tab.items>
 
@@ -423,6 +465,60 @@
                     </div>
                     <div class="mt-4">
                         <livewire:dogs.training-roadmap :dog="$dog" :key="'training-'.$dog->id" />
+                    </div>
+                </x-ts-tab.items>
+
+                {{-- GALLERY --}}
+                <x-ts-tab.items tab="Gallery">
+                    <div class="max-w-7xl mx-auto mt-6 space-y-6">
+
+                        @php
+                            // Build image list for the TallStackUI v2 carousel (images only)
+                            $carouselImages = $dog->media()
+                                ->where('media_type', 'image')
+                                ->orderBy('sort_order')
+                                ->get()
+                                ->map(function ($media) use ($dog) {
+                                    return [
+                                        'src'         => asset('storage/' . $media->file_path),
+                                        'title'       => $media->caption ?: $dog->name,
+                                        'description' => $media->caption ?: null,
+                                    ];
+                                })
+                                ->values()
+                                ->all();
+                        @endphp
+
+                        {{-- Carousel preview (TallStackUI v2) --}}
+                        @if (count($carouselImages))
+                            <x-ts-card>
+                                <div class="mb-3 flex items-center justify-between">
+                                    <h2 class="text-base font-semibold">Gallery Preview</h2>
+                                    <p class="text-xs text-gray-500">
+                                        Swipe or click to browse photos.
+                                    </p>
+                                </div>
+
+                                {{-- Smaller carousel: limit width + keep aspect ratio --}}
+                                <div class="max-w-xl mx-auto">
+                                    <x-ts-carousel
+                                        :images="$carouselImages"
+                                        wrapper="aspect-[4/3]"
+                                    />
+                                </div>
+                            </x-ts-card>
+                        @else
+                            <x-ts-card>
+                                <h2 class="text-base font-semibold mb-1">Gallery Preview</h2>
+                                <p class="text-sm text-gray-500">
+                                    No photos yet. Add some below to see them here.
+                                </p>
+                            </x-ts-card>
+                        @endif
+
+                        {{-- Management (grid + add/remove via Livewire) --}}
+                        @livewire('dogs.dog-gallery', ['dog' => $dog], key('gallery-'.$dog->id))
+
                     </div>
                 </x-ts-tab.items>
 

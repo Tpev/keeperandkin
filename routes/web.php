@@ -27,6 +27,19 @@ use App\Http\Controllers\DogPdfController;
 use chillerlan\QRCode\QRCode;
 use chillerlan\QRCode\QROptions;
 use App\Http\Controllers\DogEvaluationController;
+use App\Livewire\Onboarding\TeamSetup;
+use App\Http\Controllers\DogMediaController;
+
+Route::middleware(['auth', 'verified'])->group(function () {
+    Route::post('/dogs/{dog}/media', [DogMediaController::class, 'store'])->name('dogs.media.store');
+    Route::delete('/dogs/{dog}/media/{media}', [DogMediaController::class, 'destroy'])->name('dogs.media.destroy');
+    // optional: reordering route later
+});
+
+Route::middleware(['auth', 'verified'])->group(function () {
+    Route::get('/onboarding/team', TeamSetup::class)->name('onboarding.team');
+
+});
 
 Route::middleware('auth')->group(function () {
     Route::get('/dogs/{dog}/evaluations/{evaluation}', [DogEvaluationController::class, 'show'])

@@ -115,4 +115,18 @@ class Dog extends Model
 
         return null;
     }
+	public function media()
+{
+    return $this->hasMany(\App\Models\DogMedia::class)->orderBy('sort_order');
+}
+public function galleryImages()
+{
+    return $this->media()->where('media_type', 'image');
+}
+
+public function galleryVideos()
+{
+    return $this->media()->where('media_type', 'video');
+}
+
 }

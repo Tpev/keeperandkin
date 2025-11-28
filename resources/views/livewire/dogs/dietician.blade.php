@@ -1,52 +1,68 @@
 {{-- resources/views/livewire/dogs/dietician.blade.php --}}
 @php
     use Illuminate\Support\Carbon;
+
     $KK_NAVY     = '#03314C';
     $KK_BLUE     = '#076BA8';
     $KK_BLUE_ALT = '#DAEEFF';
     $KK_DIVIDER  = '#E2E8F0';
+    $KK_DANGER   = '#DC2626';
 @endphp
 
-<section class="max-w-7xl mx-auto mt-12 border" style="background: #F7FEE7; border-color: {{ $KK_DIVIDER }};">
+<section class="max-w-7xl mx-auto mt-12 border"
+         style="background:#fff; border-color: {{ $KK_DIVIDER }};">
     {{-- Section header --}}
     <div class="px-6 py-4" style="background:#fff; border-bottom:1px solid {{ $KK_DIVIDER }}">
-        <h2 class="text-xl font-bold" style="color: {{ $KK_NAVY }}">Dietitian </h2>
+        <h2 class="text-xl font-bold" style="color: {{ $KK_NAVY }}">Dietitian</h2>
     </div>
 
-    {{-- Summary chips (from profile if present) --}}
+    {{-- Summary chips --}}
     @php
         $p = $dog->dietProfile;
-        $brand = $p?->food_brand; $name = $p?->food_name; $type = $p?->food_type;
-        $kcal = $p?->daily_calories; $meals = $p?->meals_per_day; $portion = $p?->portion_grams_per_meal;
+        $brand   = $p?->food_brand;
+        $name    = $p?->food_name;
+        $type    = $p?->food_type;
+        $kcal    = $p?->daily_calories;
+        $meals   = $p?->meals_per_day;
+        $portion = $p?->portion_grams_per_meal;
     @endphp
 
     <div class="px-6 pt-6">
         <div class="flex flex-wrap gap-2 mb-8">
+            {{-- Main diet chip --}}
             <span class="inline-flex items-center gap-2 text-xs font-semibold text-white px-3 py-1 border"
                   style="background: {{ $KK_BLUE }}; border-color: {{ $KK_BLUE }};">
                 {{ $brand || $name ? trim(($brand ?? '').' '.($name ?? '')) : 'Diet not set' }}
             </span>
+
+            {{-- Food type --}}
             @if($type)
-                <span class="inline-flex items-center gap-2 text-xs font-semibold text-white px-3 py-1 border"
-                      style="background:#22C55E; border-color:#22C55E;">
+                <span class="inline-flex items-center gap-2 text-xs font-semibold px-3 py-1 border"
+                      style="background: {{ $KK_BLUE_ALT }}; border-color: {{ $KK_BLUE }}; color: {{ $KK_BLUE }};">
                     {{ ucfirst($type) }}
                 </span>
             @endif
+
+            {{-- Daily kcal --}}
             @if($kcal)
-                <span class="inline-flex items-center gap-2 text-xs font-semibold text-white px-3 py-1 border"
-                      style="background:#0EA5E9; border-color:#0EA5E9;">
+                <span class="inline-flex items-center gap-2 text-xs font-semibold px-3 py-1 border"
+                      style="background:#fff; border-color: {{ $KK_BLUE }}; color: {{ $KK_NAVY }};">
                     {{ $kcal }} kcal/day
                 </span>
             @endif
+
+            {{-- Meals per day --}}
             @if($meals)
-                <span class="inline-flex items-center gap-2 text-xs font-semibold text-white px-3 py-1 border"
-                      style="background:#A855F7; border-color:#A855F7;">
+                <span class="inline-flex items-center gap-2 text-xs font-semibold px-3 py-1 border"
+                      style="background:#fff; border-color: {{ $KK_BLUE }}; color: {{ $KK_BLUE }};">
                     {{ $meals }} meals/day
                 </span>
             @endif
+
+            {{-- Portion per meal --}}
             @if($portion)
-                <span class="inline-flex items-center gap-2 text-xs font-semibold text-white px-3 py-1 border"
-                      style="background:#F97316; border-color:#F97316;">
+                <span class="inline-flex items-center gap-2 text-xs font-semibold px-3 py-1 border"
+                      style="background: {{ $KK_BLUE_ALT }}; border-color: {{ $KK_BLUE }}; color: {{ $KK_NAVY }};">
                     {{ number_format($portion,1) }} g/meal
                 </span>
             @endif
@@ -62,8 +78,8 @@
 
             <div class="p-6">
                 <form wire:submit.prevent="saveProfile" class="grid grid-cols-1 sm:grid-cols-6 gap-5">
-                    <x-ts-input label="Food brand" wire:model.defer="food_brand" class="sm:col-span-2" placeholder="e.g., Acme" />
-                    <x-ts-input label="Food name" wire:model.defer="food_name" class="sm:col-span-2" placeholder="e.g., Adult Salmon" />
+                    <x-ts-input label="Food brand" wire:model.defer="food_brand" class="sm:col-span-2" />
+                    <x-ts-input label="Food name" wire:model.defer="food_name" class="sm:col-span-2" />
                     <x-ts-select.native
                         label="Food type"
                         class="sm:col-span-2"
@@ -77,12 +93,12 @@
                         wire:model.defer="food_type"
                     />
 
-                    <x-ts-input label="Daily calories (kcal)" type="number" min="0" max="5000" wire:model.defer="daily_calories" class="sm:col-span-2" />
-                    <x-ts-input label="Meals per day" type="number" min="1" max="6" wire:model.defer="meals_per_day" class="sm:col-span-2" />
-                    <x-ts-input label="Portion per meal (g)" type="number" step="0.1" min="0" wire:model.defer="portion_grams_per_meal" class="sm:col-span-2" />
+                    <x-ts-input label="Daily calories" type="number" wire:model.defer="daily_calories" class="sm:col-span-2" />
+                    <x-ts-input label="Meals per day" type="number" wire:model.defer="meals_per_day" class="sm:col-span-2" />
+                    <x-ts-input label="Portion per meal (g)" type="number" step="0.1" wire:model.defer="portion_grams_per_meal" class="sm:col-span-2" />
 
-                    <x-ts-input label="Allergies (comma-separated)" wire:model.defer="allergies_csv" class="sm:col-span-3" placeholder="chicken, beef" />
-                    <x-ts-input label="Supplements (comma-separated)" wire:model.defer="supplements_csv" class="sm:col-span-3" placeholder="omega-3, probiotic" />
+                    <x-ts-input label="Allergies" wire:model.defer="allergies_csv" class="sm:col-span-3" />
+                    <x-ts-input label="Supplements" wire:model.defer="supplements_csv" class="sm:col-span-3" />
 
                     <x-ts-textarea label="Notes" rows="3" wire:model.defer="notes" class="sm:col-span-6" />
                     <x-ts-input label="Last reviewed on" type="date" wire:model.defer="last_reviewed_at" class="sm:col-span-3" />
@@ -108,11 +124,10 @@
         </button>
     </div>
 
-    <div
-        x-data="{ open: @entangle('showEntries') }"
-        x-on:toggle-diet-entries.window="open = !open"
-        x-show="open" x-cloak
-        class="px-6 mt-6">
+    <div x-data="{ open: @entangle('showEntries') }"
+         x-on:toggle-diet-entries.window="open = !open"
+         x-show="open" x-cloak
+         class="px-6 mt-6">
 
         {{-- Add entry --}}
         <div class="border mb-6" style="background:#fff; border-color: {{ $KK_DIVIDER }};">
@@ -123,10 +138,10 @@
             <div class="p-6">
                 <form wire:submit.prevent="addEntry" class="grid grid-cols-1 sm:grid-cols-6 gap-5">
                     <x-ts-input label="When" type="datetime-local" wire:model.defer="fed_at" class="sm:col-span-2" />
-                    <x-ts-input label="Meal" wire:model.defer="meal" class="sm:col-span-1" placeholder="breakfast" />
-                    <x-ts-input label="Food (optional)" wire:model.defer="entry_food" class="sm:col-span-3" placeholder="if different from profile" />
-                    <x-ts-input label="Grams" type="number" step="0.1" min="0" wire:model.defer="grams" class="sm:col-span-2" />
-                    <x-ts-input label="Calories (kcal)" type="number" min="0" wire:model.defer="calories" class="sm:col-span-2" />
+                    <x-ts-input label="Meal" wire:model.defer="meal" class="sm:col-span-1" />
+                    <x-ts-input label="Food (optional)" wire:model.defer="entry_food" class="sm:col-span-3" />
+                    <x-ts-input label="Grams" type="number" step="0.1" wire:model.defer="grams" class="sm:col-span-2" />
+                    <x-ts-input label="Calories (kcal)" type="number" wire:model.defer="calories" class="sm:col-span-2" />
                     <x-ts-select.native
                         label="Appetite"
                         class="sm:col-span-2"
@@ -184,14 +199,17 @@
                                 <td class="py-2 px-3 text-right">
                                     <button wire:click="deleteEntry({{ $e->id }})"
                                             class="px-3 py-1 text-sm font-semibold border"
-                                            style="background:#fff; border-color:#DC2626; color:#DC2626;">
+                                            style="background:#fff; border-color: {{ $KK_DANGER }}; color: {{ $KK_DANGER }};">
                                         Delete
                                     </button>
                                 </td>
                             </tr>
                         @empty
                             <tr style="border-top:1px solid {{ $KK_DIVIDER }};">
-                                <td class="py-3 px-3 text-sm" colspan="7" style="color:#6B7280;">No feeding entries yet.</td>
+                                <td class="py-3 px-3 text-sm" colspan="7"
+                                    style="color: {{ $KK_NAVY }}99;">
+                                    No feeding entries yet.
+                                </td>
                             </tr>
                         @endforelse
                     </tbody>

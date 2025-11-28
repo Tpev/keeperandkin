@@ -13,8 +13,10 @@ use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Str;
 use Laravel\Fortify\Actions\RedirectIfTwoFactorAuthenticatable;
 use Laravel\Fortify\Fortify;
-use App\Http\Responses\LoginResponse as CustomLoginResponse;
-
+use Laravel\Fortify\Contracts\RegisterResponse;
+use Laravel\Fortify\Contracts\LoginResponse;
+use App\Http\Responses\RedirectToOnboardingRegisterResponse;
+use App\Http\Responses\RedirectToOnboardingLoginResponse;
 
 class FortifyServiceProvider extends ServiceProvider
 {
@@ -23,7 +25,9 @@ class FortifyServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        // Bind responses that redirect to onboarding if team setup_type is missing
+        $this->app->singleton(RegisterResponse::class, RedirectToOnboardingRegisterResponse::class);
+        $this->app->singleton(LoginResponse::class, RedirectToOnboardingLoginResponse::class);
     }
 
     /**
@@ -38,14 +42,17 @@ class FortifyServiceProvider extends ServiceProvider
         Fortify::redirectUserForTwoFactorAuthenticationUsing(RedirectIfTwoFactorAuthenticatable::class);
 
         RateLimiter::for('login', function (Request $request) {
-            $throttleKey = Str::transliterate(Str::lower($request->input(Fortify::username())).'|'.$request->ip());
-
+            $throttleKey = Str::transliterate(
+                Str::lower($request->input(Fortify::username())).'|'.$request->ip()
+            );
             return Limit::perMinute(5)->by($throttleKey);
         });
 
         RateLimiter::for('two-factor', function (Request $request) {
             return Limit::perMinute(5)->by($request->session()->get('login.id'));
         });
-		 $this->app->singleton(LoginResponse::class, CustomLoginResponse::class);
+
+        // IMPORTANT: Do NOT rebind LoginResponse here, or you'll override the onboarding redirect.
+        // If you need custom post-login behavior, put it inside RedirectToOnboardingLoginResponse instead.
     }
 }
