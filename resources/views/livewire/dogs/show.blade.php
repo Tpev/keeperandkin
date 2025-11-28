@@ -368,7 +368,8 @@
 
                                 
                             </div>
-<livewire:dogs.adoptionchecklist :dog="$dog" :key="'training-'.$dog->id" />
+<livewire:dogs.adoption-checklist :dog="$dog" :key="'adoption-checklist-'.$dog->id" />
+
                             {{-- Simple Notes (dog description) --}}
                             @if($dog->description)
                                 <div class="border p-4" style="border-color: {{ $KK_DIVIDER }}; background: #fff;">
